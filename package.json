@@ -1,0 +1,20 @@
+{
+  "name": "sanctions-hold",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forge app for Jira: screen vendors and their owners against the OFAC and UK sanctions lists and hold approval until a reviewer decides",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "accuracy": "node scripts/accuracy.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@forge/api": "^8.5.1",
+    "@forge/bridge": "^7.4.0",
+    "@forge/events": "^3.0.11",
+    "@forge/react": "^12.6.0",
+    "@forge/resolver": "^2.0.2",
+    "@forge/sql": "^4.0.11",
+    "react": "^18.3.1"
+  }
+}

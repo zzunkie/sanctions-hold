@@ -1,0 +1,292 @@
+app:
+  id: ari:cloud:ecosystem::app/8e2ff4d2-2907-49ea-932f-fd389a12528e
+  runtime:
+    name: nodejs24.x
+    memoryMB: 1024
+  rovo:
+    tag: sanction
+    description: OFAC and UK sanctions screening for vendors and owners, with review
+      decisions in Jira
+    keywords:
+      - sanctions
+      - ofac
+      - uk sanctions
+      - vendor-onboarding
+
+modules:
+  jira:globalPage:
+    - key: sanctions-hold-page
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: Sanctions Hold
+      layout: native
+
+  jira:issuePanel:
+    - key: sanctions-hold-panel
+      resource: panel
+      resolver:
+        function: resolver
+      render: native
+      title: Sanctions Hold
+      icon: resource:static;icon.svg
+
+  jira:issueContext:
+    - key: sanctions-hold-context
+      resource: panel
+      resolver:
+        function: resolver
+      render: native
+      title: Sanctions Hold
+      label: Sanctions
+      dynamicProperties:
+        function: context-status
+      displayConditions:
+        jiraExpression: "issue.properties['sanctions-hold-counterparty'] != null"
+
+  jira:customField:
+    - key: vendor-details
+      name: Vendor details
+      description: Country, owners and directors of the vendor, screened by Sanctions Hold
+        against the OFAC and UK sanctions lists.
+      type: object
+      schema:
+        type: object
+        properties:
+          country:
+            type: string
+            maxLength: 2
+          owners:
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+                role:
+                  type: string
+                  enum: ["owner", "director"]
+                share:
+                  type: number
+        additionalProperties: false
+      view:
+        resource: vendor-field
+        render: native
+        formatter:
+          expression: "value == null ? '' : (value.country != null ? value.country + ' · ' : '') + (value.owners != null ? value.owners.map(o => o.role == 'director' ? `${o.name} (director)` : (o.share != null ? `${o.name} (${o.share}%)` : o.name)).join(', ') : '')"
+          export: true
+        experience:
+          - issue-view
+      edit:
+        resource: vendor-field-edit
+        render: native
+        experience:
+          - issue-view
+          - issue-create
+          - issue-transition
+
+  jira:workflowValidator:
+    - key: approval-check
+      name: Vendor is cleared on the sanctions lists
+      description: Blocks the transition while the vendor or one of its owners has a
+        possible sanctions match waiting for review, or a confirmed one.
+      function: validate-approval
+      projectTypes:
+        - company-managed
+
+  sql:
+    - key: main
+      engine: mysql
+
+  scheduledTrigger:
+    - key: hourly-list-check
+      function: hourly-check
+      interval: hour
+
+  consumer:
+    - key: jobs-consumer
+      queue: sanctions-jobs
+      function: job-worker
+
+  trigger:
+    - key: issue-created
+      function: on-issue-created
+      events:
+        - avi:jira:created:issue
+      filter:
+        ignoreSelf: true
+        onError: RECEIVE_AND_LOG
+    - key: issue-updated
+      function: on-issue-updated
+      events:
+        - avi:jira:updated:issue
+      filter:
+        ignoreSelf: true
+        onError: RECEIVE_AND_LOG
+    - key: app-lifecycle
+      function: on-lifecycle
+      events:
+        - avi:forge:installed:app
+        - avi:forge:upgraded:app
+
+  rovo:agent:
+    - key: sanctions-agent
+      name: Sanctions Hold
+      description: Screens a company and its owners against the OFAC and UK sanctions
+        lists, opens vendor onboarding requests in Jira and explains why an approval is held.
+      prompt: resource:static;agent/prompt.txt
+      conversationStarters:
+        - Can we buy from Rheinhafen Steel Supply in Duisburg? Evgeny Zubitskiy owns 55%.
+        - Why can't VEND-2 be approved?
+        - Did this week's list updates affect any of our vendors?
+      actions:
+        - screen-counterparty
+        - request-approval
+        - counterparty-status
+        - list-changes
+
+  rovo:mcp:
+    - key: sanctions-hold-mcp
+      name: Sanctions Hold
+      tools:
+        - screen-counterparty
+        - counterparty-status
+        - list-changes
+        - request-approval
+
+  action:
+    - key: screen-counterparty
+      name: Screen a company or person against OFAC and UK sanctions lists
+      function: act-screen
+      actionVerb: GET
+      description: >-
+        Before signing, paying or shipping to a company or person, check its name and owners against the OFAC and UK sanctions lists, with aliases and spelling variants. Returns each possible match with its list, program, countries and score.
+      inputs:
+        name:
+          title: Legal name
+          type: string
+          required: true
+          description: The legal name of the company or person, for example "Northwind
+            Packaging Inc."
+        owners:
+          title: Owners
+          type: string
+          required: false
+          description: Owners with their share and directors, separated by semicolons, for
+            example "Ali Kalhor 60%; Sara Haddad director"
+        country:
+          title: Country
+          type: string
+          required: false
+          description: Country of registration or residence, shown with the result
+    - key: counterparty-status
+      name: Get a vendor's sanctions review status
+      function: act-status
+      actionVerb: GET
+      description: >-
+        Whether a vendor known in Sanctions Hold may be approved: no match, cleared after review, waiting for review or confirmed match, with each match, the reviewer's reason and when it was last screened.
+      inputs:
+        counterparty:
+          title: Vendor name or work item
+          type: string
+          required: true
+          description: The vendor's legal name, or its onboarding work item key such as
+            VEND-12
+    - key: list-changes
+      name: List recent sanctions list changes and new matches
+      function: act-changes
+      actionVerb: GET
+      description: >-
+        OFAC and UK list updates loaded in the last days: entries added, removed or changed, and the vendors, approved or pending, that gained a possible match from them.
+      inputs:
+        days:
+          title: Days
+          type: integer
+          required: false
+          description: How many days to look back, 1 to 90 (default 7)
+
+    - key: request-approval
+      name: Open an onboarding request in Jira for a new counterparty
+      function: act-request
+      actionVerb: CREATE
+      description: >-
+        Opens a vendor onboarding work item in Jira for a company that is not known yet, with its country and owners, and screens it at once. Approval then waits for the Jira reviewers. Use after screen-counterparty when the user wants to go ahead.
+      inputs:
+        name:
+          title: Legal name
+          type: string
+          required: true
+          description: The legal name of the company
+        country:
+          title: Country
+          type: string
+          required: false
+          description: Country of registration, as a name or a two-letter code
+        owners:
+          title: Owners and directors
+          type: string
+          required: false
+          description: Owners with their share and directors, separated by semicolons, for
+            example "Ali Kalhor 60%; Sara Haddad director"
+        note:
+          title: Note
+          type: string
+          required: false
+          description: Why the counterparty is needed, for the reviewer
+
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: context-status
+      handler: index.contextStatus
+    - key: act-request
+      handler: actions.requestApproval
+    - key: validate-approval
+      handler: validator.validate
+    - key: hourly-check
+      handler: jobs.hourlyCheck
+      timeoutSeconds: 120
+    - key: job-worker
+      handler: jobs.worker
+      timeoutSeconds: 900
+    - key: on-issue-created
+      handler: events.onIssueCreated
+    - key: on-issue-updated
+      handler: events.onIssueUpdated
+    - key: on-lifecycle
+      handler: jobs.onLifecycle
+    - key: act-screen
+      handler: actions.screenCounterparty
+    - key: act-status
+      handler: actions.counterpartyStatus
+    - key: act-changes
+      handler: actions.listChanges
+
+resources:
+  - key: main
+    path: src/frontend/global.jsx
+  - key: panel
+    path: src/frontend/panel.jsx
+  - key: vendor-field
+    path: src/frontend/vendor-field.jsx
+  - key: vendor-field-edit
+    path: src/frontend/vendor-field-edit.jsx
+  - key: static
+    path: static
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - manage:jira-configuration
+    - manage:jira-project
+    - read:jira-user
+    - storage:app
+  external:
+    fetch:
+      backend:
+        - address: https://sanctionslistservice.ofac.treas.gov
+        - address: https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com
+        - address: https://sanctionslist.fcdo.gov.uk
