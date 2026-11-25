@@ -10,7 +10,7 @@ Built for Atlassian Codegeist 2026 (Apps for Business Teams, Best app with Atlas
 - A "Vendor details" custom field on the create screen and the work item: country of registration, owners with their share, and directors.
 - Name matching for the company and each owner and director: aliases, one-letter typos, transliterations (Mohammad and Muhammad), first-name-first word order, legal suffixes, and a listed person searched by one given name and surname when the list also has middle names or a patronymic. Each word is weighted by how rare it is on the lists.
 - Ownership rules from the list that names a confirmed owner: OFAC's 50 Percent Rule (listed owners holding 50% or more in the aggregate) and the UK test (one listed owner holding more than 50%; separate holdings are added up only under a joint arrangement, which the panel asks the reviewer to check). Below those, and for a listed director, the reviewer chooses to proceed or to block, with a reason.
-- Jira setup in one click: a company-managed "Vendor onboarding" project whose Approve transition runs the app's `jira:workflowValidator`, a "Sanctions review" status and a "Close without approval" transition. Work items created in the projects you choose are screened from the summary ("New vendor: Legal name") and the Vendor details field.
+- Jira setup in one click: a company-managed "Vendor onboarding" project whose Approve transition runs the app's `jira:workflowValidator`, a "Sanctions review" status and a "Close without approval" transition. Work items created in the projects you choose are screened under their summary, the vendor's legal name (a "New vendor:" prefix is left out), with the Vendor details field.
 - A Sanctions Hold panel in the work item's right sidebar with the vendor's status and the evidence side by side: name, country, date of birth and nationality where the list gives them, program or regime, aliases, addresses and the list's remarks. The reviewer marks each possible match as the same party or not, with a reason that goes into the audit record and onto the work item as a comment.
 - After each list update every vendor is screened again. An approved vendor with a new possible match moves back to Sanctions review and its work item gets a comment. A dismissed match comes back for review when its list entry changes.
 - An accuracy test that runs inside the site on the lists as loaded.
@@ -28,7 +28,7 @@ Built for Atlassian Codegeist 2026 (Apps for Business Teams, Best app with Atlas
 6. The sample starts from the latest OFAC publication without its newest SDN designations. On the Overview, select "Replay them as a list update". VEND-5, approved two months earlier, is matched by one of those designations and moves to Sanctions review with a comment. The approved vendor Berkeley Trading LLC, which has no work item, goes back to review as well.
 7. The Accuracy tab shows the held-out result. "Run the test on the current lists" runs about 13,000 searches in the background, which takes about nine minutes.
 
-To use the MCP tools on a site with Rovo, a site admin opens admin.atlassian.com → your site → Connected apps → Sanctions Hold → View app details, and under "Expose tools to MCP-compatible apps" selects "Enable tools".
+To use the MCP tools on a site with Rovo, a site admin opens the site's Site settings in admin.atlassian.com → Connected apps → sanctions-hold → Details, and under "Expose tools to MCP-compatible apps" selects "Enable tools".
 
 ## Accuracy
 

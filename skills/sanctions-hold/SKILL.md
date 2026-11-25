@@ -9,7 +9,7 @@ Sanctions Hold is a Jira app that screens vendors and their owners against the O
 
 ## Connect
 
-Add the MCP server `https://mcp.atlassian.com/forge/8e2ff4d2-2907-49ea-932f-fd389a12528e` to your agent (HTTP transport, OAuth). If you deployed your own copy of the app, use your app ID from `manifest.yml` instead. The site needs Rovo, and a site admin must first enable the tools: admin.atlassian.com → your site → Connected apps → Sanctions Hold → View app details, and under "Expose tools to MCP-compatible apps" select "Enable tools".
+Add the MCP server `https://mcp.atlassian.com/forge/8e2ff4d2-2907-49ea-932f-fd389a12528e` to your agent (HTTP transport, OAuth). If you deployed your own copy of the app, use your app ID from `manifest.yml` instead. The site needs Rovo, and a site admin must first enable the tools: in admin.atlassian.com, open the site's Site settings → Connected apps → sanctions-hold → Details, and under "Expose tools to MCP-compatible apps" select "Enable tools".
 
 ## Tools
 
@@ -27,9 +27,10 @@ Write `owners` as one string separated by semicolons, with each owner's share an
 1. Screen the legal name with the owners and directors. A company whose own name is clean gets a possible match when one of its owners or directors is listed.
 2. Read `result`:
    - `possible_match`: name the closest list entry, its list, its program or regime, the score, and the owner or director it matched. Call it a possible match until a reviewer decides in Sanctions Hold; approval in Jira stays on hold until then.
-   - `no_match`: no entry scored at or above the site's threshold on the lists as updated on the dates in `listPublished` (OFAC) and `ukListPublished` (UK).
+   - `confirmed_match`: the vendor is already in Sanctions Hold and a reviewer confirmed the match (`reviewed` is `confirmed`). Give the list entry and the vendor's status.
+   - `no_match`: no open or confirmed match at or above the site's threshold on the lists as updated on the dates in `listPublished` (OFAC) and `ukListPublished` (UK).
 3. If the user wants to go ahead, call `request-approval` with the same name, country and owners, and a short note on why the vendor is needed. Give the user the work item key it returns. Approval then waits in Jira.
-4. If `knownCounterparty` is set, the vendor is already in Sanctions Hold, even if the user left out its legal form: give its work item key instead of opening a second request. When it or `counterparty-status` gives a status, use its `meaning` field: `clear` and `cleared` may be approved; `review` waits for a reviewer or a decision; `blocked` means a confirmed match, a confirmed owner under the OFAC or UK ownership rule, a confirmed owner without a share, or a reviewer's decision to block.
+4. If `knownCounterparty` is set, the vendor is already in Sanctions Hold, even if the user left out its legal form. It was screened with the owners and directors on its record (`screenedOwners`). Give its work item key instead of opening a second request. When it or `counterparty-status` gives a status, use its `meaning` field: `clear` and `cleared` may be approved; `review` waits for a reviewer or a decision; `blocked` means a confirmed match, a confirmed owner under the OFAC or UK ownership rule, a confirmed owner without a share, or a reviewer's decision to block.
 5. You may repeat the `answer` field word for word.
 6. Do not try spelling variants to get a different result. The matcher already covers aliases, typos, transliteration, word order and missing middle names.
 
@@ -37,6 +38,6 @@ Write `owners` as one string separated by semicolons, with each owner's share an
 
 - "We're about to sign with Dexterus Global in Dubai. OK?" → `screen-counterparty` with `Dexterus Global`, country `AE`. Possible match: DEXTEROUS GLOBAL DMCC (OFAC SDN List, IRAN-EO13902), score 0.99; approval in Jira stays on hold until a reviewer decides in Sanctions Hold.
 - "Can we buy from Rheinhafen Steel Supply in Duisburg? Evgeny Zubitskiy owns 55%." → `screen-counterparty` with owners `Evgeny Zubitskiy 55%`, country `DE`: the owner matches ZUBITSKIY, Evgeny Borisovich on the UK Sanctions List (Russia). If the user still wants to go ahead, `request-approval` opens the request in Jira.
-- "Can we buy from Lowlands Metal Trading?" on the sample site → `knownCounterparty` is VEND-7 (Lowlands Metal Trading B.V.): give its key and status, and do not open another request.
+- "Can we buy from Lowlands Metal Trading?" on the sample site → `knownCounterparty` is VEND-7 (Lowlands Metal Trading B.V.), `result` is `confirmed_match`: its 60% owner matches TATTERSALL, Alexander on the UK Sanctions List, a reviewer confirmed him, and approval stays blocked. Do not open another request.
 - "Why can't VEND-2 be approved?" → `counterparty-status` with `VEND-2`.
 - "Did this week's list updates affect any of our vendors?" → `list-changes` with `7`.

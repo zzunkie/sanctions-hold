@@ -61,7 +61,7 @@ function Panel() {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
-                <Heading size="xsmall">{owner ? `Possible match for ${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'Possible match for the company name'}</Heading>
+                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
                 {h.status !== 'pending' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} />
                 <ReviewedNote hit={h} />

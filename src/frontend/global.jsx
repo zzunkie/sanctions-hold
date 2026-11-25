@@ -129,6 +129,8 @@ const EVENT_TEXT = {
   approved: 'Approved',
   list_updated: 'Sanctions lists loaded',
   rescreen_all: 'All vendors screened',
+  screened_by_tool: 'Screened by an agent',
+  counterparty_added: 'Request opened by an agent',
 };
 
 function eventDetail(e) {
@@ -137,6 +139,8 @@ function eventDetail(e) {
   if (e.type === 'rescreen_all') return `${d.counterparties} vendors, ${d.newMatches} new possible matches`;
   if (e.type.startsWith('match_')) return `${d.matchedName} (${score(d.score)})${d.reason && e.type !== 'match_found' ? `: ${d.reason}` : ''}`;
   if (e.type === 'approved') return `screening result: ${STATUS[d.status]?.label || d.status}; lists updated ${fmtVersion(d.listVersion)}`;
+  if (e.type === 'screened_by_tool') return `${d.owners?.length ? `with ${d.owners.join(', ')}: ` : ''}${d.matches ? `${d.matches} ${d.matches === 1 ? 'match' : 'matches'}` : 'no match'}`;
+  if (e.type === 'counterparty_added') return (d.owners || []).join(', ');
   if (e.type === 'approval_blocked') return `${STATUS[d.status]?.label || d.status}; ${d.matches} open ${d.matches === 1 ? 'match' : 'matches'}`;
   return '';
 }
@@ -162,9 +166,9 @@ function Overview({ data, reload, goReview }) {
       ) : null}
       {!data.onboarding ? <JiraSetup setup={data.setup} onDone={reload} /> : (
         <Inline space="space.100" alignBlock="baseline">
-          <Text color="color.text.subtle">Jira:</Text>
+          <Text>Onboarding project:</Text>
           <Link href={`/browse/${data.onboarding.projectKey}`}>{`Vendor onboarding (${data.onboarding.projectKey})`}</Link>
-          <Text color="color.text.subtle">The Approve transition runs the sanctions check.</Text>
+          <Text color="color.text.subtle">New work items are screened when they are created, and Approve checks the result.</Text>
         </Inline>
       )}
       {data.approvedMatched.length ? (
@@ -190,13 +194,13 @@ function Overview({ data, reload, goReview }) {
       <Heading size="small">Recent activity</Heading>
       {data.recent.length ? (
         <DynamicTable
-          head={{ cells: [{ key: 't', content: 'Time (UTC)' }, { key: 'e', content: 'Event' }, { key: 'v', content: 'Vendor' }, { key: 'd', content: 'Detail' }] }}
+          head={{ cells: [{ key: 't', content: 'Time (UTC)', width: 16 }, { key: 'e', content: 'Event', width: 20 }, { key: 'v', content: 'Vendor', width: 26 }, { key: 'd', content: 'Detail', width: 38 }] }}
           rows={data.recent.map((e, i) => ({
             key: `${e.at}-${i}`,
             cells: [
               { key: 't', content: fmtTime(e.at) },
               { key: 'e', content: EVENT_TEXT[e.type] || e.type },
-              { key: 'v', content: e.issue_key ? <Inline space="space.050"><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || '') },
+              { key: 'v', content: e.issue_key ? <Inline space="space.050"><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || e.detail?.name || '') },
               { key: 'd', content: eventDetail(e) },
             ],
           }))}
@@ -521,7 +525,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Projects screened automatically</Heading>
-        <Text color="color.text.subtle">A work item created in these projects is screened from its summary ("New vendor: Legal name") and its Vendor details field (country, owners and directors). Without the field, "Country:" and "Owners:" lines in the description are read.</Text>
+        <Text color="color.text.subtle">A work item created in these projects is screened under its summary, the vendor's legal name (a "New vendor:" prefix is left out), with the country, owners and directors in its Vendor details field. Without the field, "Country:" and "Owners:" lines in the description are read.</Text>
         <Box xcss={xcss({ width: '480px' })}>
           <Select inputId="projects" isMulti value={data.projects.map((p) => ({ label: p, value: p }))} options={data.available.map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }))} onChange={(o) => save({ threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, projects: (o || []).map((x) => x.value) })} />
         </Box>

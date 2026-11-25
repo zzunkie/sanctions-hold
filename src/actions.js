@@ -19,7 +19,7 @@ const STATUS_TEXT = {
   clear: 'no possible match on the lists as loaded; Sanctions Hold does not hold its approval',
   cleared: 'every possible match was reviewed and dismissed, or a reviewer let a listed minority owner or director proceed; Sanctions Hold does not hold its approval',
   review: 'a possible match or a reviewer decision is pending; approval is held',
-  blocked: 'a reviewer confirmed a sanctions list match for this vendor or one of its owners; do not approve, pay or sign',
+  blocked: 'a reviewer confirmed a sanctions list match for this vendor or one of its owners; approval stays blocked in Jira',
   unscreened: 'not screened yet',
 };
 
@@ -35,7 +35,7 @@ const countryCode = (v) => BY_COUNTRY.get(text(v, 60).toLowerCase()) || null;
 // ("Lowlands Metal Trading" and "Lowlands Metal Trading B.V.").
 async function findKnown(name, { withIssue = false } = {}) {
   const first = name.split(/\s+/)[0].replace(/[\\%_]/g, (c) => `\\${c}`);
-  const rows = await q(`SELECT id, name, status, issue_key FROM counterparty WHERE LOWER(name) LIKE LOWER(?)${withIssue ? ' AND issue_key IS NOT NULL' : ''} ORDER BY created_at DESC LIMIT 100`, `${first}%`);
+  const rows = await q(`SELECT id, name, status, issue_key, owners FROM counterparty WHERE LOWER(name) LIKE LOWER(?)${withIssue ? ' AND issue_key IS NOT NULL' : ''} ORDER BY created_at DESC LIMIT 100`, `${first}%`);
   const key = compact(name);
   return rows.find((r) => r.name === name) || rows.find((r) => compact(r.name) === key) || null;
 }
@@ -44,10 +44,16 @@ export async function screenCounterparty(payload) {
   await ensureSchema();
   const name = text(payload?.name);
   if (!name) return { error: 'Give the legal name of the company or person to screen.' };
-  const owners = ownersFrom(payload?.owners).map((o) => o.name).slice(0, 10);
+  const given = ownersFrom(payload?.owners).map((o) => o.name).slice(0, 10);
   const cache = await loadIndex();
   if (!cache) return { error: 'The sanctions lists are not loaded in Sanctions Hold yet.' };
   const { threshold } = await getPolicy();
+  // A vendor already in Sanctions Hold is screened with the owners and directors on its record too,
+  // so a call that gives the name alone gets the same matches as the vendor's work item.
+  const known = await findKnown(name);
+  const stored = known ? ownerList(known.owners).map((o) => o.name) : [];
+  const owners = [...given, ...stored.filter((o) => !given.some((g) => compact(g) === compact(o)))].slice(0, 20);
+  const reviewed = known ? new Map((await counterpartyView(known.id)).hits.filter((h) => h.status !== 'pending').map((h) => [h.entryId, h.status])) : new Map();
   const found = screenNames(cache.index, [name, ...owners], threshold);
   const country = text(payload?.country, 60) || null;
   const matches = [...found.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 10).map(([entryId, f]) => {
@@ -55,19 +61,21 @@ export async function screenCounterparty(payload) {
     return {
       listEntry: entryId, list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
       screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
+      reviewed: reviewed.get(entryId) || null,
     };
   });
-  const known = await findKnown(name);
+  const open = matches.filter((m) => !m.reviewed);
+  const confirmed = matches.filter((m) => m.reviewed === 'confirmed');
+  const REVIEWED = { confirmed: ', confirmed by a reviewer', dismissed: ', dismissed by a reviewer as not the same party' };
   await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version }, actor: 'mcp' });
   const answer = matches.length
-    ? `Possible match for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}`).join('; ')}. A reviewer should compare the details in Sanctions Hold before anyone signs, pays or ships.`
+    ? `${open.length ? 'Possible match' : 'Reviewed match'} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || ''}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
     : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists as updated on ${cache.state.published}${cache.state.ukPublished ? ` or the UK Sanctions List as updated on ${cache.state.ukPublished}` : ''}.`;
-  // A vendor already in Sanctions Hold is answered from its record first: its owners and the reviewers'
-  // decisions are there, while this call may have been given the name alone.
-  const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}. ` : '';
+  // A known vendor is answered from its record first, where the reviewers' decisions are.
+  const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}.${stored.length ? ` Screened with the owners and directors on its record (${stored.join(', ')}).` : ''} ` : '';
   return {
-    answer: knownText + answer, result: matches.length ? 'possible_match' : 'no_match', threshold,
-    listPublished: cache.state.published, ukListPublished: cache.state.ukPublished || null, listVersion: cache.version, matches,
+    answer: knownText + answer, result: open.length ? 'possible_match' : confirmed.length ? 'confirmed_match' : 'no_match', threshold,
+    listPublished: cache.state.published, ukListPublished: cache.state.ukPublished || null, listVersion: cache.version, screenedOwners: owners, matches,
     knownCounterparty: known ? { name: known.name, status: known.status, meaning: STATUS_TEXT[known.status], workItem: known.issue_key } : null,
   };
 }
@@ -145,7 +153,7 @@ export async function requestApproval(payload, context) {
       project: { key: onboarding.projectKey },
       issuetype: { id: onboarding.taskTypeId },
       summary: `New vendor: ${name}`.slice(0, 250),
-      description: adf(accountId ? ['Requested through the Sanctions Hold MCP tool by ', { mention: accountId }, '.'] : 'Requested through the Sanctions Hold MCP tool.', note ? `Note: ${note}` : null),
+      description: adf(accountId ? ['Requested in Rovo or an MCP client by ', { mention: accountId }, '.'] : 'Requested in Rovo or an MCP client.', note ? `Note: ${note}` : null),
     },
   });
   await setVendorField(issue.key, { country, owners }).catch((e) => console.error('vendor field', e.message));
