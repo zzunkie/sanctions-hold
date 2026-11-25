@@ -48,8 +48,8 @@ modules:
   jira:customField:
     - key: vendor-details
       name: Vendor details
-      description: Country, owners and directors of the vendor, screened by Sanctions Hold
-        against the OFAC and UK sanctions lists.
+      description: Country, owners and directors of the vendor, with an owner's year of birth and
+        nationality when known, screened by Sanctions Hold against the OFAC and UK sanctions lists.
       type: object
       schema:
         type: object
@@ -70,12 +70,18 @@ modules:
                   enum: ["owner", "director"]
                 share:
                   type: number
+                born:
+                  type: string
+                  maxLength: 10
+                nationality:
+                  type: string
+                  maxLength: 2
         additionalProperties: false
       view:
         resource: vendor-field
         render: native
         formatter:
-          expression: "value == null ? '' : (value.country != null ? value.country + ' · ' : '') + (value.owners != null ? value.owners.map(o => o.role == 'director' ? `${o.name} (director)` : (o.share != null ? `${o.name} (${o.share}%)` : o.name)).join(', ') : '')"
+          expression: "value == null ? '' : (value.country != null ? value.country + ' · ' : '') + (value.owners != null ? value.owners.map(o => (o.role == 'director' ? `${o.name} (director)` : (o.share != null ? `${o.name} (${o.share}%)` : o.name)) + (o.born != null ? `, born ${o.born}` : '') + (o.nationality != null ? `, ${o.nationality}` : '')).join('; ') : '')"
           export: true
         experience:
           - issue-view
@@ -135,17 +141,35 @@ modules:
     - key: sanctions-agent
       name: Sanctions Hold
       description: Screens a company and its owners against the OFAC and UK sanctions
-        lists, opens vendor onboarding requests in Jira and explains why an approval is held.
+        lists, prepares review notes on a vendor's matches, opens onboarding requests in
+        Jira and explains why an approval is held.
       prompt: resource:static;agent/prompt.txt
       conversationStarters:
         - Can we buy from Rheinhafen Steel Supply in Duisburg? Evgeny Zubitskiy owns 55%.
-        - Why can't VEND-2 be approved?
+        - Prepare the review notes for Savannah Freight Ltd.
         - Did this week's list updates affect any of our vendors?
       actions:
         - screen-counterparty
         - request-approval
         - counterparty-status
         - list-changes
+        - match-evidence
+        - add-review-note
+      skills:
+        - sanctions-hold
+
+  rovo:skill:
+    - key: sanctions-hold
+      source:
+        dir: skills/sanctions-hold
+      dependencies:
+        tools:
+          - screen-counterparty
+          - request-approval
+          - counterparty-status
+          - list-changes
+          - match-evidence
+          - add-review-note
 
   rovo:mcp:
     - key: sanctions-hold-mcp
@@ -155,6 +179,8 @@ modules:
         - counterparty-status
         - list-changes
         - request-approval
+        - match-evidence
+        - add-review-note
 
   action:
     - key: screen-counterparty
@@ -162,7 +188,7 @@ modules:
       function: act-screen
       actionVerb: GET
       description: >-
-        Before signing, paying or shipping to a company or person, check its name and owners against the OFAC and UK sanctions lists, with aliases and spelling variants. Returns each possible match with its list, program, countries and score.
+        Check a company or person and its owners and directors against the OFAC and UK sanctions lists, with aliases and spelling variants. Returns each match with its list, program and score, and the work item and status of a known vendor.
       inputs:
         name:
           title: Legal name
@@ -174,8 +200,9 @@ modules:
           title: Owners
           type: string
           required: false
-          description: Owners with their share and directors, separated by semicolons, for
-            example "Ali Kalhor 60%; Sara Haddad director"
+          description: Owners with their share and directors, separated by semicolons, with a
+            year of birth and nationality when known, for example "Ali Kalhor 60% born 1963
+            nationality Iran; Sara Haddad director"
         country:
           title: Country
           type: string
@@ -228,13 +255,44 @@ modules:
           title: Owners and directors
           type: string
           required: false
-          description: Owners with their share and directors, separated by semicolons, for
-            example "Ali Kalhor 60%; Sara Haddad director"
+          description: Owners with their share and directors, separated by semicolons, with a
+            year of birth and nationality when known, for example "Ali Kalhor 60% born 1963
+            nationality Iran; Sara Haddad director"
         note:
           title: Note
           type: string
           required: false
           description: Why the counterparty is needed, for the reviewer
+    - key: match-evidence
+      name: Get the evidence behind a vendor's sanctions matches
+      function: act-evidence
+      actionVerb: GET
+      description: >-
+        Each match of a vendor in Sanctions Hold with the full list entry (aliases, dates of birth, nationality, addresses, remarks) next to the owner or company it was found for, and whether birth year and nationality agree. Use it to prepare review notes.
+      inputs:
+        counterparty:
+          title: Vendor name or work item
+          type: string
+          required: true
+          description: The vendor's legal name, or its onboarding work item key such as
+            VEND-12
+    - key: add-review-note
+      name: Add review notes to a vendor's work item
+      function: act-note
+      actionVerb: CREATE
+      description: >-
+        Posts review notes as a comment on a vendor's onboarding work item, for the reviewer who decides the matches in Sanctions Hold. Use after match-evidence when the user wants the notes on the work item.
+      inputs:
+        workItem:
+          title: Work item
+          type: string
+          required: true
+          description: The vendor's onboarding work item key, such as VEND-12
+        notes:
+          title: Notes
+          type: string
+          required: true
+          description: The notes, one point per line
 
   function:
     - key: resolver
@@ -263,6 +321,10 @@ modules:
       handler: actions.counterpartyStatus
     - key: act-changes
       handler: actions.listChanges
+    - key: act-evidence
+      handler: actions.matchEvidence
+    - key: act-note
+      handler: actions.addReviewNote
 
 resources:
   - key: main

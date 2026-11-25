@@ -7,7 +7,7 @@ import { ownerList, formatOwner, peopleText } from '../core/owners.js';
 
 // OFAC writes some countries differently ("Korea, South"), so both spellings are tried when comparing.
 export const countryName = (c) => (c ? COUNTRY_NAMES[String(c).toUpperCase()] || countryNameOf(c) || c : '');
-const countrySpellings = (c) => [COUNTRY_NAMES[String(c || '').toUpperCase()], countryNameOf(c)].filter(Boolean).map((x) => x.toLowerCase());
+import { countrySpellings, compareOwner } from '../core/evidence.js';
 
 export async function call(name, payload = {}) {
   const res = await invoke(name, payload);
@@ -48,11 +48,12 @@ export const fmtDate = (s) => (s ? String(s).slice(0, 10).replace(/-/g, '\u2011'
 export const fmtTime = (s) => (s ? String(s).replace('T', ' ').slice(0, 16) : '');
 export const score = (n) => Number(n).toFixed(2);
 // List versions look like "2026-11-23+2026-11-24:6b7c553e" (OFAC and UK dates), with ":held" for the demo hold-back.
-export const fmtVersion = (v) => {
+// The work item panel leaves the hold-back out; the Overview explains it once.
+export const fmtVersion = (v, { held: showHeld = true } = {}) => {
   if (!v) return '';
   const [dates, , held] = String(v).split(':');
   const [ofac, uk] = dates.split('+');
-  return `OFAC ${ofac}${uk ? `, UK ${uk}` : ''}${held ? ', newest SDN designations held back' : ''}`;
+  return `OFAC ${ofac}${uk ? `, UK ${uk}` : ''}${held && showHeld ? ', newest SDN designations held back' : ''}`;
 };
 export const matchedText = (h) => (h.entry && h.entry.name !== h.matchedName ? `${h.matchedName} (alias of ${h.entry.name})` : h.entry?.name || h.matchedName);
 // A non-breaking hyphen keeps a key such as VEND-5 on one line in narrow table cells.
@@ -65,6 +66,14 @@ const clip = (s, n) => (s.length <= n ? s : `${s.slice(0, s.lastIndexOf(' ', n))
 export const ownerOfHit = (hit, cp) => (hit.queriedName === cp.name ? null
   : ownerList(cp.owners).find((o) => o.name.toLowerCase() === String(hit.queriedName).toLowerCase()) || { name: hit.queriedName, role: 'owner', share: null });
 
+// Vendor side / list side: the countries for a company name, the nationalities for an owner or director.
+export function placesOfHit(hit, cp) {
+  const owner = ownerOfHit(hit, cp);
+  if (!owner) return `${countryName(cp.country) || 'not given'} / ${hit.entry?.countries || 'none given'}`;
+  const listed = hit.entry ? compareOwner(owner, hit.entry).nationality : null;
+  return `Nationality: ${countryName(owner.nationality) || 'not given'} / ${listed || 'none given'}`;
+}
+
 // The evidence a reviewer needs, side by side: what the vendor gave and what the list entry says.
 export function MatchEvidence({ hit, cp }) {
   const e = hit.entry;
@@ -74,19 +83,19 @@ export function MatchEvidence({ hit, cp }) {
   const places = e.addresses.map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 3);
   const listed = String(e.countries || '').toLowerCase();
   const sameCountry = cp.country && listed ? countrySpellings(cp.country).some((x) => listed.includes(x)) : null;
-  // OFAC remarks and the UK details both read "DOB ...; nationality ...".
-  const fact = (re) => re.exec(e.remarks || '')?.[1]?.trim() || null;
-  const born = fact(/\bDOB:?\s*([^;]+)/i);
-  const nationality = fact(/\bnationality:?\s*([^;]+)/i);
+  const facts = compareOwner(owner, e);
+  // Red when the owner's detail agrees with the list entry, green when it differs.
+  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'success'}>{cmp}</Lozenge> : null);
+  const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
   const row = (key, label, mine, theirs) => ({ key, cells: [{ key: 'l', content: <Strong>{label}</Strong> }, { key: 'v', content: mine }, { key: 'e', content: theirs }] });
   const rows = [
-    row('n', owner ? (owner.role === 'director' ? 'Director' : 'Owner') : 'Name', owner ? formatOwner(owner) : cp.name, matchedText(hit)),
-    // For an owner or director the vendor's country says nothing about the person's nationality.
-    row('c', 'Country', owner ? `${countryName(cp.country) || 'not given'} (company)` : countryName(cp.country) || 'not given',
-      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{owner || sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'success'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>),
+    row('n', owner ? (owner.role === 'director' ? 'Director' : 'Owner') : 'Name', owner ? `${owner.name}${owner.role === 'director' ? ' (director)' : owner.share != null ? ` (${owner.share}%)` : ''}` : cp.name, matchedText(hit)),
+    // For an owner or director the company's country says nothing about the person; nationality does.
+    ...(owner ? [] : [row('c', 'Country', countryName(cp.country) || 'not given',
+      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'success'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
     row('t', 'Type', owner ? 'person' : 'company', e.kind),
-    ...(e.kind === 'individual' && born ? [row('b', 'Born', '', born)] : []),
-    ...(e.kind === 'individual' && nationality ? [row('i', 'Nationality', '', nationality)] : []),
+    ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),
+    ...(e.kind === 'individual' && (facts.nationality || owner?.nationality) ? [row('i', 'Nationality', countryName(owner?.nationality) || 'not given', withTag(facts.nationality || 'none given', facts.nationalityCompared))] : []),
     row('p', e.list === 'UK' ? 'Regime' : 'Program', '', e.programs || 'none given'),
     row('a', 'Address', '', places.length ? places.join(' | ') : 'none given'),
   ];

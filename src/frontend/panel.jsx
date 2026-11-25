@@ -54,14 +54,14 @@ function Panel() {
       {cp ? (
         <Stack space="space.150">
           <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>
-          <Text color="color.text.subtle">{`${countryName(cp.country) || 'No country'} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version) : listDates(data.list)}`}</Text>
+          <Text color="color.text.subtle">{`${countryName(cp.country) || 'No country'} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
           {note ? <Text>{note}</Text> : null}
           <OwnershipNote view={view} onDone={load} />
           {open.map((h) => {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
-                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
+                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? 'Dismissed match' : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
                 {h.status !== 'pending' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} />
                 <ReviewedNote hit={h} />

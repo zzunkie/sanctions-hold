@@ -61,7 +61,7 @@ export function demoVendors(now = Date.now()) {
       note: 'Spelling variant of a name on the SDN list.',
     },
     {
-      key: 'd-owner', name: 'Crescent Bay Marine Services FZE', country: 'AE', owners: ['Ali Kalhor (60%)', 'Sara Haddad (40%)'], approvedAt: null, request: true,
+      key: 'd-owner', name: 'Crescent Bay Marine Services FZE', country: 'AE', owners: ['Ali Kalhor (60%, born 1963, nationality Iran)', 'Sara Haddad (40%)'], approvedAt: null, request: true,
       note: 'The company name is clean; an owner with 60% is on the SDN list (name in a different order), so the 50 Percent Rule blocks it once confirmed.',
     },
     {
@@ -77,12 +77,16 @@ export function demoVendors(now = Date.now()) {
       note: 'Approved before its designation; the replayed list update matches it.',
     },
     {
-      key: 'd-minority', name: 'Lakshmi Polymers Pvt. Ltd.', country: 'IN', owners: ['Meera Iyer (80%)', 'Suniel Kumar Sharma (20%)'], approvedAt: null, request: true,
+      key: 'd-minority', name: 'Lakshmi Polymers Pvt. Ltd.', country: 'IN', owners: ['Meera Iyer (80%)', 'Suniel Kumar Sharma (20%, born 1979, nationality India)'], approvedAt: null, request: true,
       note: 'A 20% owner is on the SDN list; below 50%, so a reviewer decides whether to proceed.',
     },
     {
-      key: 'd-uk', name: 'Lowlands Metal Trading B.V.', country: 'NL', owners: ['Alexander Tattersall (60%)', 'Femke de Vries (40%)'], approvedAt: null, request: true,
+      key: 'd-uk', name: 'Lowlands Metal Trading B.V.', country: 'NL', owners: ['Alexander Tattersall (60%, born 1961, nationality Netherlands)', 'Femke de Vries (40%)'], approvedAt: null, request: true,
       note: 'The 60% owner is on the UK Sanctions List only (listed with two middle names), so the UK ownership test blocks it once confirmed.',
+    },
+    {
+      key: 'd-namesake', name: 'Savannah Freight Ltd', country: 'KE', owners: ['Yusuf Ibrahim (100%, born 1990, nationality Kenya)'], approvedAt: null, request: true,
+      note: 'The owner shares a common name with two listed people; his year of birth and nationality differ from both, so a reviewer dismisses them.',
     },
     {
       key: 'd-later-us', name: 'Berkeley Trading LLC', country: 'US', owners: [], approvedAt: new Date(now - 210 * DAY).toISOString(),
@@ -92,7 +96,7 @@ export function demoVendors(now = Date.now()) {
 }
 
 export function sampleVendors(now = Date.now()) {
-  return [...demoVendors(now), ...ordinaryVendors(188, now)];
+  return [...demoVendors(now), ...ordinaryVendors(187, now)];
 }
 
 // The demo holds back the newest SDN designations at the first import and adds them back as a

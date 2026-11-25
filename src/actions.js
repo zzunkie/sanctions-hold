@@ -5,12 +5,13 @@ import { ensureSchema, q, iso, dt, logEvent, getSetting } from './backend/db.js'
 import { loadIndex } from './backend/screen-index.js';
 import { screenNames, getPolicy, screenCounterparties } from './backend/screening.js';
 import { counterpartyView, createCounterparty } from './backend/counterparties.js';
-import { jira, adf, setProperty } from './backend/jira.js';
+import { jira, adf, setProperty, comment } from './backend/jira.js';
 import { setVendorField } from './backend/vendor-field.js';
 import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
-import { COUNTRIES } from './core/countries.js';
+import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
+import { compareOwner } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List' };
 const text = (v, n = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -31,6 +32,10 @@ const ownersFrom = (v) => {
 const BY_COUNTRY = new Map(COUNTRIES.flatMap(([code, name]) => [[code.toLowerCase(), code], [name.toLowerCase(), code]]));
 const countryCode = (v) => BY_COUNTRY.get(text(v, 60).toLowerCase()) || null;
 
+// Rovo calls carry the agent's id in the invocation context; calls through the Atlassian MCP server do not.
+const viaOf = (payload) => (payload?.context?.agentId ? 'rovo' : 'mcp');
+const callerOf = (payload, context) => context?.principal?.accountId || payload?.context?.accountId || null;
+
 // A vendor already in Sanctions Hold under the same name, written with or without its legal form
 // ("Lowlands Metal Trading" and "Lowlands Metal Trading B.V.").
 async function findKnown(name, { withIssue = false } = {}) {
@@ -40,7 +45,7 @@ async function findKnown(name, { withIssue = false } = {}) {
   return rows.find((r) => r.name === name) || rows.find((r) => compact(r.name) === key) || null;
 }
 
-export async function screenCounterparty(payload) {
+export async function screenCounterparty(payload, context) {
   await ensureSchema();
   const name = text(payload?.name);
   if (!name) return { error: 'Give the legal name of the company or person to screen.' };
@@ -67,7 +72,7 @@ export async function screenCounterparty(payload) {
   const open = matches.filter((m) => !m.reviewed);
   const confirmed = matches.filter((m) => m.reviewed === 'confirmed');
   const REVIEWED = { confirmed: ', confirmed by a reviewer', dismissed: ', dismissed by a reviewer as not the same party' };
-  await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version }, actor: 'mcp' });
+  await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version, via: viaOf(payload) }, actor: callerOf(payload, context) || viaOf(payload) });
   const answer = matches.length
     ? `${open.length ? 'Possible match' : 'Reviewed match'} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || ''}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
     : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists as updated on ${cache.state.published}${cache.state.ukPublished ? ` or the UK Sanctions List as updated on ${cache.state.ukPublished}` : ''}.`;
@@ -80,14 +85,19 @@ export async function screenCounterparty(payload) {
   };
 }
 
+// A vendor by its work item key or by name (exact first, then a part of the name).
+async function lookup(key) {
+  const isIssue = /^[A-Z][A-Z0-9_]+-\d+$/i.test(key);
+  return isIssue
+    ? q('SELECT id FROM counterparty WHERE issue_key = ? ORDER BY created_at DESC LIMIT 1', key.toUpperCase())
+    : q('SELECT id FROM counterparty WHERE name = ? OR name LIKE ? ORDER BY name = ? DESC, created_at DESC LIMIT 3', key, `%${key}%`, key);
+}
+
 export async function counterpartyStatus(payload) {
   await ensureSchema();
   const key = text(payload?.counterparty, 200);
   if (!key) return { error: 'Give a vendor name or a work item key such as VEND-12.' };
-  const isIssue = /^[A-Z][A-Z0-9_]+-\d+$/i.test(key);
-  const rows = isIssue
-    ? await q('SELECT id FROM counterparty WHERE issue_key = ? ORDER BY created_at DESC LIMIT 1', key.toUpperCase())
-    : await q('SELECT id FROM counterparty WHERE name = ? OR name LIKE ? ORDER BY name = ? DESC, created_at DESC LIMIT 3', key, `%${key}%`, key);
+  const rows = await lookup(key);
   if (!rows.length) return { found: false, answer: `No vendor "${key}" in Sanctions Hold. Use screen-counterparty to check a new name.` };
   const v = await counterpartyView(rows[0].id);
   const cp = v.counterparty;
@@ -114,14 +124,18 @@ export async function listChanges(payload) {
   const versions = await q('SELECT id, published, fetched_at, entries, added, removed, changed, note FROM list_version WHERE fetched_at >= ? ORDER BY fetched_at DESC', since);
   const changes = await q('SELECT change_type, entry_id, name, programs FROM list_change WHERE at >= ? ORDER BY at DESC LIMIT 200', since);
   const matched = await q(`SELECT c.name, c.issue_key, c.status, c.approved_at, h.matched_name, h.score, h.entry_id FROM hit h JOIN counterparty c ON c.id = h.counterparty_id
-                           WHERE h.found_at >= ? AND h.status = 'pending' AND h.active = 1 ORDER BY c.approved_at IS NULL, h.score DESC LIMIT 50`, since);
+                           WHERE h.found_at >= ? AND h.status = 'pending' AND h.active = 1
+                             AND h.entry_id IN (SELECT entry_id FROM list_change WHERE at >= ? AND change_type IN ('added', 'changed'))
+                           ORDER BY c.approved_at IS NULL, h.score DESC LIMIT 50`, since, since);
   const count = (t) => changes.filter((c) => c.change_type === t).length;
   const approved = matched.filter((m) => m.approved_at);
+  const waiting = matched.filter((m) => !m.approved_at);
   // The first import of a site has no list changes; it is not counted as an update.
   const updates = versions.filter((v) => v.added || v.removed || v.changed);
   const answer = versions.length
     ? `${updates.length ? `In the last ${days} days Sanctions Hold loaded ${updates.length} sanctions list ${updates.length === 1 ? 'update' : 'updates'}: ${count('added')} entries added, ${count('removed')} removed, ${count('changed')} changed.` : `In the last ${days} days Sanctions Hold loaded the sanctions lists for the first time and no update has come since.`} `
       + (approved.length ? `${approved.length} approved ${approved.length === 1 ? 'vendor now has' : 'vendors now have'} a possible match: ${approved.map((m) => `${m.name}${m.issue_key ? ` (${m.issue_key})` : ''} ~ ${m.matched_name}`).join('; ')}.` : 'No approved vendor gained a possible match.')
+      + (waiting.length ? ` ${waiting.length} ${waiting.length === 1 ? 'vendor' : 'vendors'} not yet approved also gained one: ${waiting.map((m) => `${m.name}${m.issue_key ? ` (${m.issue_key})` : ''} ~ ${m.matched_name}`).join('; ')}.` : '')
     : `No sanctions list update was loaded in the last ${days} days.`;
   return {
     answer, days,
@@ -147,17 +161,17 @@ export async function requestApproval(payload, context) {
   const owners = ownerStrings(ownersFrom(payload?.owners));
   const country = countryCode(payload?.country);
   const note = text(payload?.note, 1000);
-  const accountId = context?.principal?.accountId || payload?.context?.principal?.accountId || null;
+  const accountId = callerOf(payload, context);
   const issue = await jira(route`/rest/api/3/issue`, 'POST', {
     fields: {
       project: { key: onboarding.projectKey },
       issuetype: { id: onboarding.taskTypeId },
-      summary: `New vendor: ${name}`.slice(0, 250),
-      description: adf(accountId ? ['Requested in Rovo or an MCP client by ', { mention: accountId }, '.'] : 'Requested in Rovo or an MCP client.', note ? `Note: ${note}` : null),
+      summary: name.slice(0, 250),
+      description: adf([viaOf(payload) === 'rovo' ? 'Requested through the Sanctions Hold agent in Rovo' : 'Requested through the Sanctions Hold tools in an MCP client', ...(accountId ? [' by ', { mention: accountId }] : []), '.'], note ? `Note: ${note}` : null),
     },
   });
   await setVendorField(issue.key, { country, owners }).catch((e) => console.error('vendor field', e.message));
-  const id = await createCounterparty({ name, country, owners, issueKey: issue.key, source: 'mcp' }, accountId || 'mcp');
+  const id = await createCounterparty({ name, country, owners, issueKey: issue.key, source: viaOf(payload) }, accountId || viaOf(payload));
   await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id }).catch(() => null);
   await screenCounterparties([id], { actor: accountId || 'mcp', reason: 'requested through MCP' });
   const v = await counterpartyView(id);
@@ -168,4 +182,65 @@ export async function requestApproval(payload, context) {
     created: true, workItem: issue.key, status: cp.status, meaning: STATUS_TEXT[cp.status], country, owners,
     matches: open.map((h) => ({ listEntry: h.entryId, name: h.entry?.name || h.matchedName, screenedName: h.queriedName, score: h.score })),
   };
+}
+
+// The evidence behind a vendor's matches, for an agent preparing a reviewer's notes: each open,
+// confirmed or dismissed match with the full list entry next to the owner or company it was found for.
+const clipText = (v, n) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : `${t.slice(0, t.lastIndexOf(' ', n))}…`; };
+
+export async function matchEvidence(payload, context) {
+  await ensureSchema();
+  const key = text(payload?.counterparty, 200);
+  if (!key) return { error: 'Give a vendor name or a work item key such as VEND-12.' };
+  const rows = await lookup(key);
+  if (!rows.length) return { found: false, answer: `No vendor "${key}" in Sanctions Hold.` };
+  const v = await counterpartyView(rows[0].id);
+  const cp = v.counterparty;
+  const owners = ownerList(cp.owners);
+  const shown = v.hits.filter((h) => h.status !== 'pending' || h.active);
+  const matches = shown.map((h) => {
+    const e = h.entry;
+    const owner = h.queriedName === cp.name ? null
+      : owners.find((o) => o.name.toLowerCase() === String(h.queriedName).toLowerCase()) || { name: h.queriedName, role: 'owner', share: null };
+    const facts = e ? compareOwner(owner, e) : {};
+    return {
+      listEntry: h.entryId, list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
+      review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : 'dismissed as not the same party',
+      reviewReason: h.reason || null,
+      foundFor: owner
+        ? { owner: owner.name, role: owner.role, share: owner.share ?? null, born: owner.born || null, nationality: owner.nationality ? countryNameOf(owner.nationality) : null }
+        : { company: cp.name, country: cp.country ? countryNameOf(cp.country) : null },
+      listDetails: e ? {
+        type: e.kind, programOrRegime: e.programs || null, countries: e.countries || null, born: facts.born, nationality: facts.nationality,
+        aliases: (e.aliases || []).map((a) => a.n).slice(0, 15), addresses: (e.addresses || []).map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 5),
+        remarks: clipText(e.remarks, 2500), stillListed: e.onList,
+      } : null,
+      compared: owner ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared' } : null,
+    };
+  });
+  const waiting = matches.filter((m) => m.review === 'waiting for review').length;
+  return {
+    found: true, workItem: cp.issue_key, name: cp.name, country: cp.country ? countryNameOf(cp.country) : null, status: cp.status, meaning: STATUS_TEXT[cp.status],
+    owners: owners.map((o) => ({ name: o.name, role: o.role, share: o.share ?? null, born: o.born || null, nationality: o.nationality ? countryNameOf(o.nationality) : null })),
+    answer: `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}, ${waiting} waiting for review. Compare each list entry with the person or company it was found for.`,
+    matches,
+  };
+}
+
+// Post the agent's notes for the reviewer on the vendor's work item. The reviewer still decides
+// each match in the Sanctions Hold panel.
+export async function addReviewNote(payload, context) {
+  await ensureSchema();
+  const key = text(payload?.workItem, 40).toUpperCase();
+  const notes = String(payload?.notes ?? '').replace(/\r/g, '').trim().slice(0, 4000);
+  if (!/^[A-Z][A-Z0-9_]+-\d+$/.test(key)) return { error: 'Give the vendor\'s work item key, such as VEND-12.' };
+  if (!notes) return { error: 'Give the notes to post.' };
+  const [cp] = await q('SELECT id, name FROM counterparty WHERE issue_key = ?', key);
+  if (!cp) return { error: `No vendor in Sanctions Hold has the work item ${key}.` };
+  const accountId = callerOf(payload, context);
+  const from = viaOf(payload) === 'rovo' ? 'Review notes from the Sanctions Hold agent' : 'Review notes posted through the Sanctions Hold MCP tools';
+  await comment(key, accountId ? [`${from}, requested by `, { mention: accountId }, ':'] : `${from}:`,
+    ...notes.split(/\n+/).map((l) => l.trim()).filter(Boolean).slice(0, 40));
+  await logEvent({ counterpartyId: cp.id, issueKey: key, type: 'review_note_added', detail: { name: cp.name, length: notes.length, via: viaOf(payload) }, actor: accountId || viaOf(payload) });
+  return { added: true, workItem: key, answer: `Added the review notes to ${key} as a comment.` };
 }

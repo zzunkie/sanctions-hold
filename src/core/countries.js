@@ -3,3 +3,10 @@ export const COUNTRIES = [["AF","Afghanistan"],["AX","Åland Islands"],["AL","Al
 
 const BY_CODE = new Map(COUNTRIES);
 export const countryNameOf = (code) => BY_CODE.get(String(code || '').toUpperCase()) || null;
+// A country code from a code ("RU") or an English name ("Russia", "russia"); null when unknown.
+const BY_NAME = new Map(COUNTRIES.map(([code, name]) => [name.toLowerCase(), code]));
+export const countryCodeOf = (v) => {
+  const s = String(v ?? '').trim();
+  if (/^[A-Za-z]{2}$/.test(s) && BY_CODE.has(s.toUpperCase())) return s.toUpperCase();
+  return BY_NAME.get(s.toLowerCase()) || null;
+};

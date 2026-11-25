@@ -60,6 +60,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   const events = [];
   const statuses = [];
   const approvedMatched = [];
+  const newlyHeld = [];
   for (const cp of cps) {
     const own = hitsBy.get(cp.id) || [];
     const found = screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold);
@@ -86,6 +87,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     if (status !== cp.status) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: version } });
     if (ids) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
     if (cp.approved_at && r.opened.length) approvedMatched.push({ cp, opened: r.opened });
+    else if (!cp.approved_at && cp.issue_key && HELD.has(status) && !HELD.has(cp.status)) newlyHeld.push(cp.issue_key);
   }
   const update = `ON DUPLICATE KEY UPDATE queried_name = VALUES(queried_name), matched_name = VALUES(matched_name), score = VALUES(score),
                   status = VALUES(status), active = 1, entry_hash = VALUES(entry_hash)`;
@@ -103,6 +105,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
   await logEvents(events);
   for (const m of approvedMatched) await notifyApprovedMatch(m, cache).catch((e) => console.error('notify', m.cp.issue_key, e.message));
+  for (const k of newlyHeld) await moveToReview(k).catch((e) => console.error('hold', k, e.message));
   return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
 }
 
@@ -121,11 +124,14 @@ async function notifyApprovedMatch({ cp, opened }, cache) {
     'The vendor is back in the review queue and this work item moves to Sanctions review. Decide in the Sanctions Hold panel whether it is the same party.',
   );
   await addLabel(cp.issue_key, 'sanctions-review');
-  await holdApproval(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));
+  await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));
 }
 
-// Move an approved work item to the "Sanctions review" status, where Approve runs the check again.
-async function holdApproval(issueKey) {
+// Statuses that hold approval; their work items belong in "Sanctions review".
+export const HELD = new Set(['review', 'blocked']);
+
+// Move a work item to the "Sanctions review" status, where Approve runs the check again.
+export async function moveToReview(issueKey) {
   const t = await jira(route`/rest/api/3/issue/${issueKey}/transitions`);
   const hold = (t.transitions || []).find((x) => x.to?.name === 'Sanctions review');
   if (hold) await jira(route`/rest/api/3/issue/${issueKey}/transitions`, 'POST', { transition: { id: hold.id } });

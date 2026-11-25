@@ -9,13 +9,20 @@ const ROLE_OPTIONS = [{ value: 'owner', label: 'Owner' }, { value: 'director', l
 const nameBox = xcss({ width: '220px' });
 const shareBox = xcss({ width: '80px' });
 const roleBox = xcss({ width: '130px' });
+const bornBox = xcss({ width: '120px' });
+const natBox = xcss({ width: '220px' });
+const YEAR = /^\d{4}(-\d{2}-\d{2})?$/;
 
-// Keeps only rows with a name; a share is kept for owners and must be between 0 and 100.
+// Keeps only rows with a name; a share is kept for owners and must be between 0 and 100; a year
+// (or date) of birth and a nationality are kept when given.
 function clean(v) {
   const owners = (v.owners || [])
-    .map((o) => ({ name: String(o.name || '').trim(), role: o.role === 'director' ? 'director' : 'owner', share: o.share === '' || o.share == null ? null : Number(o.share) }))
+    .map((o) => ({ ...o, name: String(o.name || '').trim(), role: o.role === 'director' ? 'director' : 'owner', share: o.share === '' || o.share == null ? null : Number(o.share), born: String(o.born || '').trim() }))
     .filter((o) => o.name)
-    .map((o) => ({ name: o.name, role: o.role, ...(o.role === 'owner' && Number.isFinite(o.share) && o.share >= 0 && o.share <= 100 ? { share: o.share } : {}) }));
+    .map((o) => ({
+      name: o.name, role: o.role, ...(o.role === 'owner' && Number.isFinite(o.share) && o.share >= 0 && o.share <= 100 ? { share: o.share } : {}),
+      ...(YEAR.test(o.born) ? { born: o.born } : {}), ...(o.nationality ? { nationality: o.nationality } : {}),
+    }));
   return { ...(v.country ? { country: v.country } : {}), owners };
 }
 
@@ -26,7 +33,7 @@ function VendorDetailsEdit() {
     view.getContext().then((c) => {
       const v = c?.extension?.fieldValue ?? c?.fieldValue ?? null;
       setCreateMode((c?.extension?.renderContext || '') === 'issue-create');
-      setValue({ country: v?.country || '', owners: (v?.owners || []).map((o) => ({ ...o, share: o.share ?? '' })) });
+      setValue({ country: v?.country || '', owners: (v?.owners || []).map((o) => ({ ...o, share: o.share ?? '', born: o.born ?? '', nationality: o.nationality || '' })) });
     });
   }, []);
   if (!value) return <Text>Loading</Text>;
@@ -42,14 +49,22 @@ function VendorDetailsEdit() {
       </Stack>
       <Label labelFor="vd-owner-0">Owners and directors</Label>
       {value.owners.map((o, i) => (
-        <Inline key={i} space="space.100" alignBlock="center" shouldWrap>
-          <Box xcss={nameBox}><Textfield id={`vd-owner-${i}`} placeholder="Full name" value={o.name} onChange={(e) => setOwner(i, { name: e.target.value })} /></Box>
-          <Box xcss={roleBox}><Select options={ROLE_OPTIONS} value={ROLE_OPTIONS.find((r) => r.value === (o.role || 'owner'))} onChange={(r) => setOwner(i, { role: r.value })} /></Box>
-          {o.role !== 'director' ? <Box xcss={shareBox}><Textfield type="number" placeholder="%" value={String(o.share ?? '')} onChange={(e) => setOwner(i, { share: e.target.value })} /></Box> : null}
-          <Button appearance="subtle" onClick={() => update({ ...value, owners: value.owners.filter((_, j) => j !== i) })}>Remove</Button>
-        </Inline>
+        <Stack key={i} space="space.050">
+          <Inline space="space.100" alignBlock="center" shouldWrap>
+            <Box xcss={nameBox}><Textfield id={`vd-owner-${i}`} aria-label="Full name" placeholder="Full name" value={o.name} onChange={(e) => setOwner(i, { name: e.target.value })} /></Box>
+            <Box xcss={roleBox}><Select aria-label="Role" options={ROLE_OPTIONS} value={ROLE_OPTIONS.find((r) => r.value === (o.role || 'owner'))} onChange={(r) => setOwner(i, { role: r.value })} /></Box>
+            {o.role !== 'director' ? <Box xcss={shareBox}><Textfield type="number" aria-label="Share (%)" placeholder="Share %" value={String(o.share ?? '')} onChange={(e) => setOwner(i, { share: e.target.value })} /></Box> : null}
+            <Button appearance="subtle" onClick={() => update({ ...value, owners: value.owners.filter((_, j) => j !== i) })}>Remove</Button>
+          </Inline>
+          <Inline space="space.100" alignBlock="center" shouldWrap>
+            <Box xcss={bornBox}><Textfield aria-label="Year of birth" placeholder="Born (year)" value={String(o.born ?? '')} onChange={(e) => setOwner(i, { born: e.target.value })} /></Box>
+            <Box xcss={natBox}><Select aria-label="Nationality" placeholder="Nationality" options={COUNTRY_OPTIONS} isClearable
+              value={o.nationality ? { value: o.nationality, label: countryNameOf(o.nationality) || o.nationality } : null}
+              onChange={(c) => setOwner(i, { nationality: c?.value || '' })} /></Box>
+          </Inline>
+        </Stack>
       ))}
-      <Inline><Button onClick={() => update({ ...value, owners: [...value.owners, { name: '', role: 'owner', share: '' }] })}>Add owner or director</Button></Inline>
+      <Inline><Button onClick={() => update({ ...value, owners: [...value.owners, { name: '', role: 'owner', share: '', born: '', nationality: '' }] })}>Add owner or director</Button></Inline>
     </Stack>
   );
   // On the create screen Jira takes the value when focus leaves the field; on the work item the

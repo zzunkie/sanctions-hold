@@ -32,8 +32,8 @@ define('overview', async () => {
   const [c, list, check, setup, onboarding, queue, recent] = await Promise.all([
     counts(), listState(), getSetting('listCheck', null), setupStatus(), getSetting('onboarding', null), reviewQueue(),
     q(`SELECT l.at, l.type, l.issue_key, l.entry_id, l.detail, l.actor, c.name FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
-       WHERE l.type IN ('match_found', 'match_reopened', 'match_dismissed', 'match_confirmed', 'approval_blocked', 'approved', 'list_updated', 'rescreen_all', 'screened_by_tool')
-          OR (l.type = 'counterparty_added' AND l.detail LIKE '%"source":"mcp"%')
+       WHERE l.type IN ('match_found', 'match_reopened', 'match_dismissed', 'match_confirmed', 'approval_blocked', 'approved', 'list_updated', 'rescreen_all', 'screened_by_tool', 'review_note_added')
+          OR (l.type = 'counterparty_added' AND (l.detail LIKE '%"source":"mcp"%' OR l.detail LIKE '%"source":"rovo"%'))
        ORDER BY l.at DESC LIMIT 15`),
   ]);
   const jobs = Object.fromEntries(await Promise.all(JOBS.map(async (j) => [j, await jobState(j)])));

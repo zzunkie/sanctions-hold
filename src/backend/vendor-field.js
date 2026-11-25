@@ -1,5 +1,5 @@
 // The "Vendor details" Forge custom field: the vendor's country and its owners and directors with
-// their shares, entered on the onboarding work item. Its value is { country, owners: [{ name, role, share }] }.
+// their shares, entered on the onboarding work item. Its value is { country, owners: [{ name, role, share, born, nationality }] }.
 import { route } from '@forge/api';
 import { jira } from './jira.js';
 import { ownerList, ownerStrings } from '../core/owners.js';
@@ -17,7 +17,10 @@ export async function vendorFieldId() {
 
 export const fieldValue = ({ country, owners }) => ({
   ...(country ? { country: String(country).toUpperCase().slice(0, 2) } : {}),
-  owners: ownerList(owners).map((o) => ({ name: o.name, role: o.role, ...(o.role === 'owner' && o.share != null ? { share: o.share } : {}) })),
+  owners: ownerList(owners).map((o) => ({
+    name: o.name, role: o.role, ...(o.role === 'owner' && o.share != null ? { share: o.share } : {}),
+    ...(o.born ? { born: o.born } : {}), ...(o.nationality ? { nationality: o.nationality } : {}),
+  })),
 });
 
 export const detailsFromField = (v) => (v && typeof v === 'object'

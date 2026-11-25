@@ -7,26 +7,26 @@ Built for Atlassian Codegeist 2026 (Apps for Business Teams, Best app with Atlas
 ## Features
 
 - Lists: the OFAC SDN List and Consolidated Sanctions List from the OFAC Sanctions List Service, and the asset-freeze designations on the FCDO's UK Sanctions List: 23,959 company and individual entries with 30,605 aliases. The app checks both sources every hour and records each update entry by entry.
-- A "Vendor details" custom field on the create screen and the work item: country of registration, owners with their share, and directors.
+- A "Vendor details" custom field on the create screen and the work item: country of registration, owners with their share, year of birth and nationality, and directors.
 - Name matching for the company and each owner and director: aliases, one-letter typos, transliterations (Mohammad and Muhammad), first-name-first word order, legal suffixes, and a listed person searched by one given name and surname when the list also has middle names or a patronymic. Each word is weighted by how rare it is on the lists.
 - Ownership rules from the list that names a confirmed owner: OFAC's 50 Percent Rule (listed owners holding 50% or more in the aggregate) and the UK test (one listed owner holding more than 50%; separate holdings are added up only under a joint arrangement, which the panel asks the reviewer to check). Below those, and for a listed director, the reviewer chooses to proceed or to block, with a reason.
-- Jira setup in one click: a company-managed "Vendor onboarding" project whose Approve transition runs the app's `jira:workflowValidator`, a "Sanctions review" status and a "Close without approval" transition. Work items created in the projects you choose are screened under their summary, the vendor's legal name (a "New vendor:" prefix is left out), with the Vendor details field.
-- A Sanctions Hold panel in the work item's right sidebar with the vendor's status and the evidence side by side: name, country, date of birth and nationality where the list gives them, program or regime, aliases, addresses and the list's remarks. The reviewer marks each possible match as the same party or not, with a reason that goes into the audit record and onto the work item as a comment.
+- Jira setup in one click: a company-managed "Vendor onboarding" project whose Approve transition runs the app's `jira:workflowValidator`, a "Sanctions review" status and a "Close without approval" transition. Work items created in the projects you choose are screened under their summary, the vendor's legal name, with the Vendor details field. A new vendor with a possible or confirmed match moves to Sanctions review.
+- A Sanctions Hold panel in the work item's right sidebar, and a wider one from the work item's Apps button, with the vendor's status and the evidence side by side: name, country, date of birth and nationality where the list gives them, program or regime, aliases, addresses and the list's remarks. An owner's year of birth and nationality are marked "same" or "differs" against the list entry. The reviewer marks each possible match as the same party or not, with a reason that goes into the audit record and onto the work item as a comment.
 - After each list update every vendor is screened again. An approved vendor with a new possible match moves back to Sanctions review and its work item gets a comment. A dismissed match comes back for review when its list entry changes.
 - An accuracy test that runs inside the site on the lists as loaded.
 - An audit record as CSV: screenings, possible matches, decisions with reasons, blocked approvals, approvals and list updates, each with the list version it used.
-- Four MCP tools through the Atlassian MCP server: `screen-counterparty`, `request-approval`, `counterparty-status` and `list-changes`. See [skills/sanctions-hold/SKILL.md](skills/sanctions-hold/SKILL.md).
-- A Sanctions Hold agent in Rovo that uses the same four actions: ask it about a supplier and it screens the company and owners, and opens the onboarding request in Jira when you want to go ahead.
+- Six MCP tools through the Atlassian MCP server: `screen-counterparty`, `request-approval`, `counterparty-status`, `match-evidence`, `add-review-note` and `list-changes`. See [skills/sanctions-hold/SKILL.md](skills/sanctions-hold/SKILL.md).
+- A Sanctions Hold agent in Rovo with the same six actions, and the same instructions as a Rovo skill that other agents can add. Ask it about a supplier and it screens the company and owners, and opens the onboarding request in Jira when you want to go ahead. Start it from a work item's Agent sessions and it compares each match waiting for review with the owner's details, lists what the reviewer could ask for, and posts its notes as a comment once you confirm.
 
 ## Try it with the sample vendors
 
-1. In Jira, open Apps → Sanctions Hold and select "Load the lists and the sample vendors". It takes two to three minutes. The sample has 196 vendors, and five of them have a possible match.
-2. On the Overview, select "Create the project". It creates Vendor onboarding (VEND) with seven requests.
+1. In Jira, open Apps → Sanctions Hold and select "Load the lists and the sample vendors". It takes two to three minutes. The sample has 196 vendors, and six of them have a possible match.
+2. On the Overview, select "Create the project". It creates Vendor onboarding (VEND) with eight requests.
 3. Open VEND-1 (Dexterus Global DMCC) and try the Approve transition. Jira blocks it and names the possible match. Open "Sanctions Hold" in the right sidebar to see the evidence and decide.
 4. VEND-2: confirm the 60% owner and the vendor is blocked under OFAC's 50 Percent Rule. VEND-6: confirm the 20% owner and choose whether to proceed. VEND-7: the 60% owner is on the UK list only; confirm him and the UK test blocks the vendor.
-5. VEND-3 is close to an alias of an Iranian company; mark it "Not the same party" and it can be approved. VEND-4 has no match.
+5. VEND-3 is close to an alias of an Iranian company; mark it "Not the same party" and it can be approved. VEND-4 has no match. On VEND-8 (Savannah Freight Ltd), select Start work → Sanctions Hold under Agent sessions: the agent compares the owner, born 1990 and Kenyan, with the two list entries his name matched and offers to post its notes.
 6. The sample starts from the latest OFAC publication without its newest SDN designations. On the Overview, select "Replay them as a list update". VEND-5, approved two months earlier, is matched by one of those designations and moves to Sanctions review with a comment. The approved vendor Berkeley Trading LLC, which has no work item, goes back to review as well.
-7. The Accuracy tab shows the held-out result. "Run the test on the current lists" runs about 13,000 searches in the background, which takes about nine minutes.
+7. The Accuracy tab shows the held-out result. "Run the test on the current lists" runs about 13,000 searches in the background and shows the result when it finishes.
 
 To use the MCP tools on a site with Rovo, a site admin opens the site's Site settings in admin.atlassian.com → Connected apps → sanctions-hold → Details, and under "Expose tools to MCP-compatible apps" selects "Enable tools".
 
@@ -76,7 +76,9 @@ forge install --product jira --site <your-site>.atlassian.net
 | `src/validator.js` | Workflow validator for the Approve transition |
 | `src/events.js` | Product event triggers for new and edited work items and approvals |
 | `src/jobs.js` | Hourly list check and queue consumer |
-| `src/actions.js` | MCP tools |
+| `src/actions.js` | MCP tools and Rovo actions |
+| `skills/sanctions-hold/SKILL.md` | The Rovo skill, also the guide for MCP clients |
+| `static/agent/prompt.txt` | The Rovo agent's instructions |
 | `src/data/` | The company and person names used to measure false positives, and the offline result |
 
 ## Data and privacy

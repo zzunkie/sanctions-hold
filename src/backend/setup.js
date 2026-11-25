@@ -6,6 +6,7 @@ import { q, getSetting, setSetting, logEvent } from './db.js';
 import { jira, setProperty, adf } from './jira.js';
 import { demoVendors } from '../core/sample.js';
 import { addFieldToProjectScreens, setVendorField } from './vendor-field.js';
+import { HELD, moveToReview } from './screening.js';
 
 const TEMPLATE = 'com.atlassian.jira-core-project-templates:jira-core-simplified-task-tracking';
 const VALIDATOR = '/static/approval-check';
@@ -41,8 +42,8 @@ async function existingStatus(name) {
 }
 
 // Workflow changes on the new project: an "Approved" status reached through "Approve", which runs
-// the Sanctions Hold check; a "Sanctions review" status where the app moves an approved vendor that
-// a list update matches, with "Approve" back out of it; and the template's "Done" transition renamed
+// the Sanctions Hold check; a "Sanctions review" status where the app moves a new vendor with an open
+// or confirmed match and an approved vendor that a list update matches, with "Approve" back out of it; and the template's "Done" transition renamed
 // so that closing a request is not read as approving it. Returns the two status ids.
 export const HOLD_STATUS = 'Sanctions review';
 export const HOLD_TRANSITION = 'Hold for sanctions review';
@@ -68,9 +69,9 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
   }
 
   const approved = await statusRef('Approved', 'DONE', 'The vendor is approved for payment and contracts.');
-  const hold = await statusRef(HOLD_STATUS, 'IN_PROGRESS', 'A sanctions list update matched this approved vendor. A reviewer decides before it is approved again.');
+  const hold = await statusRef(HOLD_STATUS, 'IN_PROGRESS', 'The vendor or one of its owners has a possible or confirmed sanctions list match. A reviewer decides in Sanctions Hold before it can be approved.');
   const statuses = read.statuses.map(({ id, name, statusCategory, statusReference, description }) => ({ id, name, statusCategory, statusReference, description }));
-  for (const x of [approved, hold]) if (!statuses.some((s) => s.statusReference === x.ref)) statuses.push(x.status);
+  for (const x of [hold, approved]) if (!statuses.some((s) => s.statusReference === x.ref)) statuses.splice(1, 0, x.status);
   const layout = wf.statuses.find((s) => s.statusReference === todo.statusReference)?.layout || { x: 0, y: 0 };
   let nextId = Math.max(...wf.transitions.map((t) => Number(t.id) || 0)) + 10;
   const doneRefs = new Set(read.statuses.filter((s) => s.statusCategory === 'DONE').map((s) => s.statusReference));
@@ -84,10 +85,12 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
       version: wf.version,
       description: wf.description || '',
       startPointLayout: wf.startPointLayout,
+      // To Do, Sanctions review, Approved, then the template's other statuses, so the board reads left to right.
       statuses: [
-        ...wf.statuses,
-        { statusReference: approved.ref, layout: { x: layout.x + 260, y: layout.y + 120 }, properties: {} },
+        ...wf.statuses.filter((x) => x.statusReference === todo.statusReference),
         { statusReference: hold.ref, layout: { x: layout.x + 520, y: layout.y + 240 }, properties: {} },
+        { statusReference: approved.ref, layout: { x: layout.x + 260, y: layout.y + 120 }, properties: {} },
+        ...wf.statuses.filter((x) => x.statusReference !== todo.statusReference),
       ],
       transitions: [
         ...transitions,
@@ -99,7 +102,7 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
         },
         {
           id: String(nextId += 10), name: HOLD_TRANSITION, type: 'DIRECTED', toStatusReference: hold.ref,
-          links: [{ fromStatusReference: approved.ref, fromPort: 4, toPort: 0 }],
+          links: [{ fromStatusReference: approved.ref, fromPort: 4, toPort: 0 }, { fromStatusReference: todo.statusReference, fromPort: 5, toPort: 1 }],
           validators: [], actions: [], triggers: [], properties: {},
         },
       ],
@@ -126,13 +129,13 @@ async function sampleRequests(target) {
   const keys = [];
   for (const v of demoVendors().filter((d) => d.request)) {
     const id = `sample-${v.key}`;
-    const [cp] = await q('SELECT id, issue_key FROM counterparty WHERE id = ?', id);
+    const [cp] = await q('SELECT id, issue_key, status FROM counterparty WHERE id = ?', id);
     if (!cp || cp.issue_key) continue;
     const issue = await jira(route`/rest/api/3/issue`, 'POST', {
       fields: {
         project: { key: target.projectKey },
         issuetype: { id: target.taskTypeId },
-        summary: `New vendor: ${v.name}`.slice(0, 250),
+        summary: v.name.slice(0, 250),
         labels: ['sanctions-hold-sample'],
         description: adf(`Onboarding request for ${v.name}, from the Sanctions Hold sample.`),
       },
@@ -141,6 +144,7 @@ async function sampleRequests(target) {
     await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, id);
     await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id });
     keys.push(issue.key);
+    if (HELD.has(cp.status)) await moveToReview(issue.key).catch((e) => console.error('hold sample', issue.key, e.message));
     if (v.approvedAt) {
       const t = await jira(route`/rest/api/3/issue/${issue.key}/transitions`);
       const approve = (t.transitions || []).find((x) => x.name === 'Approve');

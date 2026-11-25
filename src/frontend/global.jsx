@@ -5,7 +5,7 @@ import ForgeReconciler, {
   Modal, ModalTransition, ModalHeader, ModalTitle, ModalBody, ModalFooter, xcss,
 } from '@forge/react';
 import {
-  call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, IssueLink, listName, fmtDate, fmtTime, score, fmtVersion, listDates, matchedText, STATUS, countryName,
+  call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, placesOfHit, IssueLink, listName, fmtDate, fmtTime, score, fmtVersion, listDates, matchedText, STATUS, countryName,
 } from './common.jsx';
 
 const pad = xcss({ paddingTop: 'space.200' });
@@ -35,8 +35,9 @@ const JOB_TEXT = {
   'start-demo': 'Loading the OFAC and UK sanctions lists and the sample vendors, then screening every vendor. This takes two to three minutes.',
   import: 'Loading the OFAC and UK sanctions lists and screening every vendor again. This takes two to three minutes.',
   rescreen: 'Screening every vendor again.',
-  accuracy: 'Running the accuracy test on the current lists: about 13,000 searches, which take about nine minutes.',
+  accuracy: 'Running the accuracy test on the current lists: about 13,000 searches in the background. The result appears on this tab when it finishes.',
 };
+const JOB_NAME = { 'start-demo': 'Loading the lists and the sample vendors', import: 'Loading the lists', rescreen: 'Screening every vendor again', accuracy: 'The accuracy test' };
 
 // Polls while a queued job runs, then reloads the page data.
 function JobBanner({ jobs, onDone }) {
@@ -57,7 +58,7 @@ function JobBanner({ jobs, onDone }) {
       </SectionMessage>
     );
   }
-  if (failed.length) return <SectionMessage appearance="error" title="A background job failed"><Text>{`${JOB_TEXT[failed[0].type] || failed[0].type}: ${failed[0].error}`}</Text></SectionMessage>;
+  if (failed.length) return <SectionMessage appearance="error" title="A background job failed"><Text>{`${JOB_NAME[failed[0].type] || failed[0].type} stopped (${failed[0].error}). Start it again.`}</Text></SectionMessage>;
   return null;
 }
 
@@ -89,7 +90,7 @@ function JiraSetup({ setup, onDone }) {
       actions={[<SectionMessageAction key="go" onClick={start}>{state?.state === 'error' ? 'Try again' : 'Create the project'}</SectionMessageAction>]}
     >
       {state?.state === 'error' ? <Text>{state.error}</Text> : null}
-      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or a confirmed match. With the sample vendors loaded, it also adds seven onboarding requests. To use your own workflow instead, see Settings.</Text>
+      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or a confirmed match. With the sample vendors loaded, it also adds eight onboarding requests, and moves the ones with a possible match to Sanctions review. To use your own workflow instead, see Settings.</Text>
     </SectionMessage>
   );
 }
@@ -131,6 +132,16 @@ const EVENT_TEXT = {
   rescreen_all: 'All vendors screened',
   screened_by_tool: 'Screened by an agent',
   counterparty_added: 'Request opened by an agent',
+  review_note_added: 'Review notes added by an agent',
+};
+// Agent events name the surface that called the tool.
+const VIA = { rovo: 'the Rovo agent', mcp: 'an MCP client' };
+const eventLabel = (e) => {
+  const via = VIA[e.detail?.via || e.detail?.source];
+  if (via && e.type === 'screened_by_tool') return `Screened by ${via}`;
+  if (via && e.type === 'counterparty_added') return `Request opened by ${via}`;
+  if (via && e.type === 'review_note_added') return `Review notes by ${via}`;
+  return EVENT_TEXT[e.type] || e.type;
 };
 
 function eventDetail(e) {
@@ -194,12 +205,12 @@ function Overview({ data, reload, goReview }) {
       <Heading size="small">Recent activity</Heading>
       {data.recent.length ? (
         <DynamicTable
-          head={{ cells: [{ key: 't', content: 'Time (UTC)', width: 16 }, { key: 'e', content: 'Event', width: 20 }, { key: 'v', content: 'Vendor', width: 26 }, { key: 'd', content: 'Detail', width: 38 }] }}
+          head={{ cells: [{ key: 't', content: 'Time (UTC)', width: 15 }, { key: 'e', content: 'Event', width: 25 }, { key: 'v', content: 'Vendor', width: 25 }, { key: 'd', content: 'Detail', width: 35 }] }}
           rows={data.recent.map((e, i) => ({
             key: `${e.at}-${i}`,
             cells: [
               { key: 't', content: fmtTime(e.at) },
-              { key: 'e', content: EVENT_TEXT[e.type] || e.type },
+              { key: 'e', content: eventLabel(e) },
               { key: 'v', content: e.issue_key ? <Inline space="space.050"><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || e.detail?.name || '') },
               { key: 'd', content: eventDetail(e) },
             ],
@@ -241,14 +252,14 @@ function ReviewQueue({ onChange, stamp }) {
     <Stack space="space.200">
       <Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
-        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Countries (vendor / entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
+        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
         rows={data.rows.map((h) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
             { key: 'v', content: <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">Approved</Lozenge> : null}</Inline></Stack> },
             { key: 'q', content: h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
-            { key: 'c', content: `${countryName(h.counterparty.country) || '?'} / ${h.entry?.countries || '?'}` },
+            { key: 'c', content: placesOfHit(h, h.counterparty) },
             { key: 's', content: score(h.score) },
             { key: 'f', content: fmtDate(h.foundAt) },
             { key: 'x', content: <Button onClick={() => setOpen(h)}>Review</Button> },
@@ -473,7 +484,7 @@ function Accuracy({ onStarted, finishedAt }) {
   return (
     <Stack space="space.300">
       <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${offline.negatives.n.toLocaleString('en-US')} real company names and ${(offline.people?.n || 0).toLocaleString('en-US')} real person names from 17 countries, not on the lists, that are flagged for review.`}</Text>
-      <Heading size="small">{`In this site, on the lists updated ${last ? [`OFAC ${last.listPublished}`, last.ukPublished ? `UK ${last.ukPublished}` : null].filter(Boolean).join(', ') : '…'}`}</Heading>
+      <Heading size="small">{last ? `In this site, on the lists updated ${[`OFAC ${last.listPublished}`, last.ukPublished ? `UK ${last.ukPublished}` : null].filter(Boolean).join(', ')}` : 'In this site'}</Heading>
       {last ? (
         <Stack space="space.100">
           <AccuracyTable r={last} />
