@@ -67,7 +67,9 @@ export function variants(rnd, aliasesById) {
 
 // entries: [{id, name, kind}], aliasesById: Map id -> [{name}], negatives: [{name, country}] (company
 // names); people: optional [{name, country}] person names, counted the same way.
-export function evaluate(index, entries, aliasesById, negatives, { threshold = 0.92, sample = 1500, seed = 42, clock = () => Date.now(), people = null } = {}) {
+// The test in three parts, so the app can run each part in its own queue invocation:
+// list entries searched for in seven forms, then the company names, then the person names.
+export function evalPositives(index, entries, aliasesById, { threshold = 0.92, sample = 1500, seed = 42, clock = () => Date.now() } = {}) {
   const rnd = makeRng(seed);
   const pool = [...entries];
   const chosen = [];
@@ -91,12 +93,18 @@ export function evaluate(index, entries, aliasesById, negatives, { threshold = 0
       else if ((misses[k] ||= []).length < 5) misses[k].push({ query, expected: e.name, top: hits[0] ? `${hits[0].matchedName} ${hits[0].score}` : null });
     }
   }
-  // A company whose name, without the legal form, equals a list name must be reviewed by any
-  // screening; it is counted apart from false positives.
+  return { sample: chosen.length, positives, misses, ms, queries };
+}
+
+// A company whose name, without the legal form, equals a list name must be reviewed by any
+// screening; it is counted apart from false positives.
+export function evalCompanies(index, negatives, { threshold = 0.92, clock = () => Date.now() } = {}) {
   const listNames = new Set(index.names.map((n) => n.tokens.join(' ')));
   const neg = { n: 0, falsePositives: 0, sameName: 0 };
   const fpSamples = [];
   const sameSamples = [];
+  let ms = 0;
+  let queries = 0;
   for (const c of negatives) {
     if (listNames.has(tokenize(c.name).join(' '))) { neg.sameName += 1; if (sameSamples.length < 5) sameSamples.push(c.name); continue; }
     neg.n += 1;
@@ -106,29 +114,46 @@ export function evaluate(index, entries, aliasesById, negatives, { threshold = 0
     queries += 1;
     if (hits.length) { neg.falsePositives += 1; if (fpSamples.length < 15) fpSamples.push({ name: c.name, country: c.country, matched: hits[0].matchedName, score: hits[0].score }); }
   }
-  // A person whose words, in any order, equal a list name ("Wei Zhang" and "ZHANG, Wei") is counted apart.
-  let peopleNeg = null;
+  return { negatives: neg, fpSamples, sameSamples, ms, queries };
+}
+
+// A person whose words, in any order, equal a list name ("Wei Zhang" and "ZHANG, Wei") is counted apart.
+export function evalPeople(index, people, { threshold = 0.92, clock = () => Date.now() } = {}) {
+  const sorted = new Set(index.names.map((n) => [...n.tokens].sort().join(' ')));
+  const peopleNeg = { n: 0, falsePositives: 0, sameName: 0 };
   const peopleSamples = [];
-  if (people) {
-    const sorted = new Set(index.names.map((n) => [...n.tokens].sort().join(' ')));
-    peopleNeg = { n: 0, falsePositives: 0, sameName: 0 };
-    for (const p of people) {
-      if (sorted.has([...tokenize(p.name)].sort().join(' '))) { peopleNeg.sameName += 1; continue; }
-      peopleNeg.n += 1;
-      const t0 = clock();
-      const hits = screen(index, p.name, { threshold });
-      ms += clock() - t0;
-      queries += 1;
-      if (hits.length) { peopleNeg.falsePositives += 1; if (peopleSamples.length < 15) peopleSamples.push({ name: p.name, country: p.country, matched: hits[0].matchedName, score: hits[0].score }); }
-    }
+  let ms = 0;
+  let queries = 0;
+  for (const p of people) {
+    if (sorted.has([...tokenize(p.name)].sort().join(' '))) { peopleNeg.sameName += 1; continue; }
+    peopleNeg.n += 1;
+    const t0 = clock();
+    const hits = screen(index, p.name, { threshold });
+    ms += clock() - t0;
+    queries += 1;
+    if (hits.length) { peopleNeg.falsePositives += 1; if (peopleSamples.length < 15) peopleSamples.push({ name: p.name, country: p.country, matched: hits[0].matchedName, score: hits[0].score }); }
   }
-  const total = Object.values(positives).reduce((a, p) => ({ n: a.n + p.n, found: a.found + p.found }), { n: 0, found: 0 });
+  return { people: peopleNeg, peopleSamples, ms, queries };
+}
+
+// Merges the parts into one result.
+export function combine({ threshold, seed, listNames }, pos, comp, ppl) {
+  const total = Object.values(pos.positives).reduce((a, p) => ({ n: a.n + p.n, found: a.found + p.found }), { n: 0, found: 0 });
+  const ms = pos.ms + comp.ms + (ppl?.ms || 0);
+  const queries = pos.queries + comp.queries + (ppl?.queries || 0);
   return {
-    threshold, sample: chosen.length, seed, listNames: index.N,
-    recall: total.n ? total.found / total.n : 0, positives, total,
-    falsePositiveRate: neg.n ? neg.falsePositives / neg.n : 0, negatives: neg,
-    people: peopleNeg, peopleFalsePositiveRate: peopleNeg?.n ? peopleNeg.falsePositives / peopleNeg.n : null, peopleSamples,
+    threshold, sample: pos.sample, seed, listNames,
+    recall: total.n ? total.found / total.n : 0, positives: pos.positives, total,
+    falsePositiveRate: comp.negatives.n ? comp.negatives.falsePositives / comp.negatives.n : 0, negatives: comp.negatives,
+    people: ppl ? ppl.people : null, peopleFalsePositiveRate: ppl?.people.n ? ppl.people.falsePositives / ppl.people.n : null, peopleSamples: ppl ? ppl.peopleSamples : [],
     avgMs: queries ? ms / queries : 0, queries,
-    misses, fpSamples, sameSamples,
+    misses: pos.misses, fpSamples: comp.fpSamples, sameSamples: comp.sameSamples,
   };
+}
+
+export function evaluate(index, entries, aliasesById, negatives, { threshold = 0.92, sample = 1500, seed = 42, clock = () => Date.now(), people = null } = {}) {
+  const pos = evalPositives(index, entries, aliasesById, { threshold, sample, seed, clock });
+  const comp = evalCompanies(index, negatives, { threshold, clock });
+  const ppl = people ? evalPeople(index, people, { threshold, clock }) : null;
+  return combine({ threshold, seed, listNames: index.N }, pos, comp, ppl);
 }

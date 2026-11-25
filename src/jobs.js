@@ -17,6 +17,8 @@ async function track(type, fn) {
   await setSetting(`job:${type}`, state);
   try {
     const result = await fn();
+    // A job in several parts stays running until its last part.
+    if (result?.next) return;
     await setSetting(`job:${type}`, { ...state, state: 'done', finishedAt: new Date().toISOString(), result: result || null });
   } catch (e) {
     console.error(type, e);
@@ -24,8 +26,15 @@ async function track(type, fn) {
   }
 }
 
+// The queue consumer stops after 15 minutes; a job still marked as running after that has died.
+const STALE_MS = 16 * 60 * 1000;
+
 export async function jobState(type) {
-  return getSetting(`job:${type}`, null);
+  const s = await getSetting(`job:${type}`, null);
+  if (s && (s.state === 'running' || s.state === 'queued') && Date.now() - Date.parse(s.startedAt) > STALE_MS) {
+    return { ...s, state: 'error', error: 'The job stopped before it finished. Start it again.', finishedAt: s.startedAt };
+  }
+  return s;
 }
 
 export async function queueJob(type, body = {}) {
@@ -61,7 +70,11 @@ export async function worker(event) {
   } else if (type === 'setup-jira') {
     await runSetup(event.body);
   } else if (type === 'accuracy') {
-    await track('accuracy', () => runAccuracy());
+    await track('accuracy', async () => {
+      const r = await runAccuracy(event.body.step || 'positives');
+      if (r.next) await push({ type: 'accuracy', step: r.next });
+      return r;
+    });
   }
 }
 
