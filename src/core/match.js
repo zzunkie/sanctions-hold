@@ -138,7 +138,11 @@ function tokenSim(q, c) {
   if (Math.abs(q.length - c.length) > Math.max(2, 0.25 * Math.max(q.length, c.length))) return 0;
   let sim = jaroWinkler(q, c);
   const key = phoneticKey(q);
-  if (key.length >= 3 && sim >= 0.75 && key === phoneticKey(c)) sim = Math.max(sim, 0.9);
+  const sameSound = key.length >= 3 && key === phoneticKey(c);
+  if (sameSound && sim >= 0.75) sim = Math.max(sim, 0.9);
+  // A shared beginning alone ("XIAOQUAN" and "XIAOYAN") is not enough: the words must differ by one
+  // letter, share their consonants, or be nearly equal.
+  if (!sameSound && sim < 0.95 && editDistance(q, c, 1) > 1) return 0;
   // Unrelated words of similar letters still score about 0.8 with Jaro-Winkler; count them as no match.
   return sim >= 0.88 ? sim : 0;
 }
@@ -169,9 +173,10 @@ export function personParts(name) {
 // Score in [0, 1]. The query side counts more: a vendor name often leaves out a middle name or a
 // trailing word that the list entry has. For a listed person, an owner written with the surname
 // and one given name ("Viktor Bout" for "BOUT, Viktor Anatolijevitch") is not marked down for the
-// other given names, patronymics or titles the list has, as long as the surname is spelled as
-// listed, or the given name is and the surname differs by at most one letter. Such a match scores
-// at most 0.97, so that only a name matching every listed word scores 1.00.
+// other given names, patronymics or titles the list has, as long as the given name is spelled as
+// listed or transliterated (Yusuf / Yousef), and the surname is spelled as listed, or differs by one
+// letter when the given name is exact. Such a match scores at most 0.97, so that only a name
+// matching every listed word scores 1.00.
 export function nameScore(qTokens, cTokens, weight = () => 1, qCompact = qTokens.join(''), cCompact = cTokens.join(''), person = null) {
   if (!qTokens.length || !cTokens.length) return 0;
   const sq = coverage(qTokens, cTokens, weight);
@@ -181,9 +186,10 @@ export function nameScore(qTokens, cTokens, weight = () => 1, qCompact = qTokens
   if (person && person.given.length > 1 && sq >= 0.8) {
     const best = (t) => Math.max(...qTokens.map((x) => tokenSim(t, x)));
     const given = person.given.reduce((a, t) => (best(t) > best(a) ? t : a), person.given[0]);
+    const givenSpelled = qTokens.some((x) => x === given || (given.length >= 3 && phoneticKey(x) === phoneticKey(given)));
     const surnameExact = person.surname.every((t) => best(t) === 1);
     const surnameNear = person.surname.every((t) => qTokens.some((x) => x === t || oneEdit(x, t)));
-    if (surnameExact || (best(given) === 1 && surnameNear)) {
+    if (givenSpelled && (surnameExact || (best(given) === 1 && surnameNear))) {
       const part = coverage([...person.surname, given], qTokens, weight);
       if (part > sc) { sc = part; partial = true; }
     }

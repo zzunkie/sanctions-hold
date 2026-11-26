@@ -144,11 +144,14 @@ const eventLabel = (e) => {
   return EVENT_TEXT[e.type] || e.type;
 };
 
+// The list of a match in the activity table, so two matches for the same person read apart.
+const LIST_SHORT = { SDN: 'OFAC SDN', CONS: 'OFAC Consolidated', UK: 'UK', EU: 'EU' };
+
 function eventDetail(e) {
   const d = e.detail || {};
   if (e.type === 'list_updated') return d.initial ? `first import, lists updated ${listDates(d)}: ${Number(d.entries).toLocaleString('en-US')} entries${d.heldBack ? ' (newest SDN designations held back)' : ''}` : `lists updated ${listDates(d)}: ${d.added} added, ${d.removed} removed, ${d.changed} changed`;
   if (e.type === 'rescreen_all') return `${d.counterparties} vendors, ${d.newMatches} new possible matches`;
-  if (e.type.startsWith('match_')) return `${d.matchedName} (${score(d.score)})${d.reason && e.type !== 'match_found' ? `: ${d.reason}` : ''}`;
+  if (e.type.startsWith('match_')) return `${d.matchedName}, ${LIST_SHORT[String(e.entry_id).split(':')[0]] || 'list'} (${score(d.score)})${d.reason && e.type !== 'match_found' ? `: ${d.reason}` : ''}`;
   if (e.type === 'approved') return `screening result: ${STATUS[d.status]?.label || d.status}; lists updated ${fmtVersion(d.listVersion)}`;
   if (e.type === 'screened_by_tool') return `${d.owners?.length ? `with ${d.owners.join(', ')}: ` : ''}${d.matches ? `${d.matches} ${d.matches === 1 ? 'match' : 'matches'}` : 'no match'}`;
   if (e.type === 'counterparty_added') return (d.owners || []).join(', ');
@@ -418,11 +421,12 @@ function ListUpdates({ stamp }) {
   const matched = latest ? data.matched.filter((m) => m.found_version === latest.id) : [];
   return (
     <Stack space="space.300">
-      <Text color="color.text.subtle">The app checks the OFAC Sanctions List Service, the UK Sanctions List and the EU Financial Sanctions Files for a new version every hour and imports them when a file has changed. Entries are compared by OFAC entry number, UK Unique ID or EU entity ID, so additions, removals and changes to names, aliases, programs or countries are recorded. The UK Sanctions List contains public sector information licensed under the Open Government Licence v3.0. The EU list is reused from the European Commission's Financial Sanctions Files; only the texts published in the Official Journal of the EU are authentic.</Text>
+      <Text color="color.text.subtle">The app checks the OFAC Sanctions List Service, the UK Sanctions List and the EU Financial Sanctions Files for a new version every hour and imports them when a file has changed. Entries are compared by OFAC entry number, UK Unique ID or EU entity ID, so additions, removals and changes to names, aliases, programs or regimes, and countries are recorded. The UK Sanctions List contains public sector information licensed under the Open Government Licence v3.0. The EU list is reused from the European Commission's Financial Sanctions Files; only the texts published in the Official Journal of the EU are authentic.</Text>
       <DynamicTable
         head={{ cells: [{ key: 'p', content: 'Lists updated' }, { key: 'l', content: 'Loaded (UTC)' }, { key: 'e', content: 'Entries' }, { key: 'a', content: 'Added' }, { key: 'r', content: 'Removed' }, { key: 'c', content: 'Changed' }, { key: 'n', content: 'Note' }] }}
+        // Non-breaking hyphens keep each list date on one line in the narrow first column.
         rows={data.versions.map((v) => ({ key: v.id, cells: [
-          { key: 'p', content: fmtVersion(v.id, { held: false }) || v.published || '' }, { key: 'l', content: fmtTime(v.fetched_at) }, { key: 'e', content: Number(v.entries).toLocaleString('en-US') },
+          { key: 'p', content: (fmtVersion(v.id, { held: false }) || v.published || '').replace(/-/g, '\u2011') }, { key: 'l', content: fmtTime(v.fetched_at) }, { key: 'e', content: Number(v.entries).toLocaleString('en-US') },
           { key: 'a', content: String(v.added) }, { key: 'r', content: String(v.removed) }, { key: 'c', content: String(v.changed) }, { key: 'n', content: v.note || '' },
         ] }))}
       />
@@ -440,7 +444,7 @@ function ListUpdates({ stamp }) {
           ) : <Text>No vendor matches the changed entries.</Text>}
           <Heading size="small">Changed entries</Heading>
           <DynamicTable
-            head={{ cells: [{ key: 't', content: 'Change' }, { key: 'n', content: 'Name' }, { key: 'k', content: 'Type' }, { key: 'p', content: 'Programs' }, { key: 'c', content: 'Countries' }] }}
+            head={{ cells: [{ key: 't', content: 'Change' }, { key: 'n', content: 'Name' }, { key: 'k', content: 'Type' }, { key: 'p', content: 'Program or regime' }, { key: 'c', content: 'Countries' }] }}
             rows={changes.map((c) => ({ key: `${c.entry_id}-${c.change_type}`, cells: [
               { key: 't', content: <Lozenge appearance={CHANGE[c.change_type]?.appearance}>{CHANGE[c.change_type]?.label || c.change_type}</Lozenge> },
               { key: 'n', content: c.name || c.entry_id }, { key: 'k', content: c.kind || '' }, { key: 'p', content: c.programs || '' }, { key: 'c', content: c.countries || '' },
@@ -497,7 +501,7 @@ function Accuracy({ onStarted, finishedAt }) {
   const { offline, last } = data;
   return (
     <Stack space="space.300">
-      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${offline.negatives.n.toLocaleString('en-US')} real company names and ${(offline.people?.n || 0).toLocaleString('en-US')} real person names from 17 countries, not on the lists, that are flagged for review.`}</Text>
+      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${offline.negatives.n.toLocaleString('en-US')} real company names and ${(offline.people?.n || 0).toLocaleString('en-US')} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
       <Heading size="small">{last ? `In this site, on the lists updated ${[`OFAC ${last.listPublished}`, last.ukPublished ? `UK ${last.ukPublished}` : null, last.euPublished ? `EU ${last.euPublished}` : null].filter(Boolean).join(', ')}` : 'In this site'}</Heading>
       {last ? (
         <Stack space="space.100">
@@ -522,10 +526,10 @@ const OWNER_RULES = [
   { value: 'any', label: 'Block on any confirmed listed owner or director' },
 ];
 const THRESHOLDS = [
-  { value: 0.88, label: '0.88: more possible matches (99.8% recall; 1.3% of companies, 2.1% of people flagged)' },
-  { value: 0.9, label: '0.90 (99.8% recall; 0.9% of companies, 1.9% of people flagged)' },
-  { value: 0.92, label: '0.92: default (99.8% recall; 0.3% of companies, 1.6% of people flagged)' },
-  { value: 0.94, label: '0.94: fewer reviews (99.7% recall; 0.1% of companies, 1.4% of people flagged)' },
+  { value: 0.88, label: '0.88: more possible matches (99.6% recall; 0.8% of companies, 2.0% of people flagged)' },
+  { value: 0.9, label: '0.90 (99.6% recall; 0.7% of companies, 1.9% of people flagged)' },
+  { value: 0.92, label: '0.92: default (99.5% recall; 0.3% of companies, 1.8% of people flagged)' },
+  { value: 0.94, label: '0.94: fewer reviews (99.4% recall; 0.2% of companies, 1.6% of people flagged)' },
 ];
 
 function Settings({ onChange, onRemoved, stamp }) {
@@ -547,7 +551,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Listed owners and directors</Heading>
-        <Text color="color.text.subtle">Choose how a confirmed listed owner or director affects the vendor. With the ownership rules, the vendor is blocked when confirmed OFAC-listed owners hold 50% or more in the aggregate (OFAC's 50 Percent Rule), when confirmed EU-listed owners hold 50% or more in the aggregate (Council of the EU Best Practices, 2024), when one confirmed UK-listed owner holds more than 50% (the UK adds up separate holdings only under a joint arrangement), or when a confirmed owner's share is not given. Below that, and for directors, a reviewer decides whether to proceed or block.</Text>
+        <Text color="color.text.subtle">Choose how a confirmed listed owner or director affects the vendor. With the ownership rules, the vendor is blocked when confirmed OFAC-listed owners hold 50% or more in the aggregate (OFAC's 50 Percent Rule), when confirmed EU-listed owners hold 50% or more in the aggregate (Council of the EU Best Practices, 2024), when one confirmed UK-listed owner holds more than 50% (the UK adds up separate holdings only under a joint arrangement), or when a confirmed owner's share is not given. When none of these rules blocks the vendor, and for directors, a reviewer decides whether to proceed or block.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="owner-rule" value={OWNER_RULES.find((r) => r.value === (data.policy.ownerRule || 'fifty'))} options={OWNER_RULES} onChange={(o) => o && save({ threshold: data.policy.threshold, ownerRule: o.value })} /></Box>
       </Stack>
       <Stack space="space.100">

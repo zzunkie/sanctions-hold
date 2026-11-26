@@ -5,7 +5,7 @@ import { ensureSchema, q, iso, dt, logEvent, getSetting } from './backend/db.js'
 import { loadIndex } from './backend/screen-index.js';
 import { screenNames, getPolicy, screenCounterparties } from './backend/screening.js';
 import { counterpartyView, createCounterparty, NEXT } from './backend/counterparties.js';
-import { jira, adf, setProperty, comment } from './backend/jira.js';
+import { jira, adf, setProperty, comment, createIssue } from './backend/jira.js';
 import { setVendorField } from './backend/vendor-field.js';
 import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
@@ -14,6 +14,8 @@ import { compact } from './core/match.js';
 import { compareOwner } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
+// The EU reference number ("EU.12764.77") that the panel and the Commission's file show for an EU entry.
+const euRef = (e) => { const r = e?.list === 'EU' ? /EU reference number (\S+?);/.exec(`${e.remarks || ''};`)?.[1] : null; return r ? { euReferenceNumber: r } : {}; };
 const text = (v, n = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const trimStop = (v) => String(v ?? '').trim().replace(/[.\s]+$/, '');
 const STATUS_TEXT = {
@@ -60,11 +62,16 @@ export async function screenCounterparty(payload, context) {
   const owners = [...given, ...stored.filter((o) => !given.some((g) => compact(g) === compact(o)))].slice(0, 20);
   const reviewed = known ? new Map((await counterpartyView(known.id)).hits.filter((h) => h.status !== 'pending').map((h) => [h.entryId, h.status])) : new Map();
   const found = screenNames(cache.index, [name, ...owners], threshold);
+  // The in-memory index keeps no remarks; read them for EU entries, whose reference number is in the remarks.
+  const euIds = [...found.keys()].filter((id) => cache.index.byEntry.get(id)?.list === 'EU').slice(0, 10);
+  const euRemarks = new Map(euIds.length
+    ? (await q(`SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (${euIds.map(() => '?').join(', ')})`, ...euIds)).map((r) => [r.entry_id, r.remarks])
+    : []);
   const country = text(payload?.country, 60) || null;
   const matches = [...found.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 10).map(([entryId, f]) => {
     const e = cache.index.byEntry.get(entryId);
     return {
-      listEntry: entryId, list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
+      listEntry: entryId, ...euRef(e && { list: e.list, remarks: euRemarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
       screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
       reviewed: reviewed.get(entryId) || null,
     };
@@ -116,7 +123,7 @@ export async function counterpartyStatus(payload) {
     found: true, answer, name: cp.name, country: cp.country, owners: cp.owners, workItem: cp.issue_key, status: cp.status, meaning: STATUS_TEXT[cp.status],
     reason: v.assessment?.reason || null,
     approvedAt: cp.approved_at, lastScreenedAt: cp.screened_at, listVersion: cp.screened_version,
-    matches: v.hits.map((h) => ({ listEntry: h.entryId, name: h.entry?.name || h.matchedName, score: h.score, status: h.status, onList: h.entry?.onList ?? null, reviewedAt: h.reviewedAt, reason: h.reason })),
+    matches: v.hits.map((h) => ({ listEntry: h.entryId, ...euRef(h.entry), name: h.entry?.name || h.matchedName, score: h.score, status: h.status, onList: h.entry?.onList ?? null, reviewedAt: h.reviewedAt, reason: h.reason })),
     lastApproval: approval ? { at: approval.at, by: approval.actor } : null,
     otherMatches: rows.length > 1 ? rows.length - 1 : 0,
   };
@@ -167,13 +174,11 @@ export async function requestApproval(payload, context) {
   const country = countryCode(payload?.country);
   const note = text(payload?.note, 1000);
   const accountId = callerOf(payload, context);
-  const issue = await jira(route`/rest/api/3/issue`, 'POST', {
-    fields: {
-      project: { key: onboarding.projectKey },
-      issuetype: { id: onboarding.taskTypeId },
-      summary: name.slice(0, 250),
-      description: adf([viaOf(payload) === 'rovo' ? 'Requested through the Sanctions Hold agent in Rovo' : 'Requested through the Sanctions Hold tools in an MCP client', ...(accountId ? [' by ', { mention: accountId }] : []), '.'], note ? `Note: ${note}` : null),
-    },
+  const issue = await createIssue({
+    project: { key: onboarding.projectKey },
+    issuetype: { id: onboarding.taskTypeId },
+    summary: name.slice(0, 250),
+    description: adf([viaOf(payload) === 'rovo' ? 'Requested through the Sanctions Hold agent in Rovo' : 'Requested through the Sanctions Hold tools in an MCP client', ...(accountId ? [' by ', { mention: accountId }] : []), '.'], note ? `Note: ${note}` : null),
   });
   await setVendorField(issue.key, { country, owners }).catch((e) => console.error('vendor field', e.message));
   const id = await createCounterparty({ name, country, owners, issueKey: issue.key, source: viaOf(payload) }, accountId || viaOf(payload));
@@ -185,7 +190,7 @@ export async function requestApproval(payload, context) {
   return {
     answer: `Opened ${issue.key} for ${name}. ${open.length ? `It has ${open.length} possible ${open.length === 1 ? 'match' : 'matches'} (${open.map((h) => h.matchedName).join('; ')}), so approval is held until a reviewer decides in Jira.` : 'No possible match on the lists as loaded; the request waits for approval in Jira.'}`,
     created: true, workItem: issue.key, status: cp.status, meaning: STATUS_TEXT[cp.status], country, owners,
-    matches: open.map((h) => ({ listEntry: h.entryId, name: h.entry?.name || h.matchedName, screenedName: h.queriedName, score: h.score })),
+    matches: open.map((h) => ({ listEntry: h.entryId, ...euRef(h.entry), name: h.entry?.name || h.matchedName, screenedName: h.queriedName, score: h.score })),
   };
 }
 
@@ -209,7 +214,7 @@ export async function matchEvidence(payload, context) {
       : owners.find((o) => o.name.toLowerCase() === String(h.queriedName).toLowerCase()) || { name: h.queriedName, role: 'owner', share: null };
     const facts = e ? compareOwner(owner, e) : {};
     return {
-      listEntry: h.entryId, list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
+      listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
       review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : 'dismissed as not the same party',
       reviewReason: h.reason || null,
       foundFor: owner

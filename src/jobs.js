@@ -17,8 +17,8 @@ async function track(type, fn) {
   await setSetting(`job:${type}`, state);
   try {
     const result = await fn();
-    // A job in several parts stays running until its last part.
-    if (result?.next) return;
+    // A job in several parts stays running until its last part; a part of a replaced run changes nothing.
+    if (result?.next || result?.superseded) return;
     await setSetting(`job:${type}`, { ...state, state: 'done', finishedAt: new Date().toISOString(), result: result || null });
   } catch (e) {
     console.error(type, e);
@@ -71,8 +71,8 @@ export async function worker(event) {
     await runSetup(event.body);
   } else if (type === 'accuracy') {
     await track('accuracy', async () => {
-      const r = await runAccuracy(event.body.step || 'positives');
-      if (r.next) await push({ type: 'accuracy', step: r.next });
+      const r = await runAccuracy(event.body.step || 'positives', Boolean(event.body.cont), event.body.runId || null);
+      if (r.next) await push({ type: 'accuracy', step: r.next, cont: true, runId: r.runId });
       return r;
     });
   }

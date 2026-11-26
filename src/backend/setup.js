@@ -3,7 +3,7 @@
 // Hold check, and onboarding requests for the sample vendors.
 import api, { route } from '@forge/api';
 import { q, getSetting, setSetting, logEvent } from './db.js';
-import { jira, setProperty, adf } from './jira.js';
+import { jira, setProperty, adf, createIssue } from './jira.js';
 import { demoVendors } from '../core/sample.js';
 import { addFieldToProjectScreens, setVendorField } from './vendor-field.js';
 import { syncWorkItem } from './screening.js';
@@ -141,14 +141,12 @@ async function sampleRequests(target) {
     const id = `sample-${v.key}`;
     const [cp] = await q('SELECT id, issue_key, status FROM counterparty WHERE id = ?', id);
     if (!cp || cp.issue_key) continue;
-    const issue = await jira(route`/rest/api/3/issue`, 'POST', {
-      fields: {
-        project: { key: target.projectKey },
-        issuetype: { id: target.taskTypeId },
-        summary: v.name.slice(0, 250),
-        labels: ['sanctions-hold-sample'],
-        description: adf(`Onboarding request for ${v.name}, from the Sanctions Hold sample.`),
-      },
+    const issue = await createIssue({
+      project: { key: target.projectKey },
+      issuetype: { id: target.taskTypeId },
+      summary: v.name.slice(0, 250),
+      labels: ['sanctions-hold-sample'],
+      description: adf(`Onboarding request for ${v.name}, from the Sanctions Hold sample.`),
     });
     await setVendorField(issue.key, { country: v.country, owners: v.owners }).catch((e) => console.error('vendor field', issue.key, e.message));
     await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, id);

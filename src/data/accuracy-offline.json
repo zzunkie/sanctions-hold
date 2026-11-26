@@ -1,56 +1,56 @@
 {
  "threshold": 0.92,
  "sample": 1500,
- "seed": 11,
+ "seed": 23,
  "listNames": 77904,
- "recall": 0.9978892677382692,
+ "recall": 0.9950633536284351,
  "positives": {
   "exact": {
    "n": 1500,
    "found": 1500
   },
   "alias": {
-   "n": 836,
-   "found": 836
+   "n": 793,
+   "found": 793
   },
   "typo": {
-   "n": 1419,
-   "found": 1412
-  },
-  "word_order": {
-   "n": 778,
-   "found": 778
-  },
-  "legal_suffix": {
-   "n": 697,
-   "found": 697
+   "n": 1411,
+   "found": 1392
   },
   "transliteration": {
-   "n": 376,
-   "found": 370
+   "n": 382,
+   "found": 371
+  },
+  "legal_suffix": {
+   "n": 684,
+   "found": 684
+  },
+  "word_order": {
+   "n": 784,
+   "found": 784
   },
   "given_and_surname": {
-   "n": 553,
-   "found": 553
+   "n": 523,
+   "found": 523
   }
  },
  "total": {
-  "n": 6159,
-  "found": 6146
+  "n": 6077,
+  "found": 6047
  },
- "falsePositiveRate": 0.0032381513099793936,
+ "falsePositiveRate": 0.0032438808611029196,
  "negatives": {
-  "n": 3397,
+  "n": 3391,
   "falsePositives": 11,
-  "sameName": 3,
+  "sameName": 9,
   "byCountry": {
    "AE": {
-    "n": 199,
-    "flagged": 0
+    "n": 200,
+    "flagged": 1
    },
    "CH": {
     "n": 200,
-    "flagged": 3
+    "flagged": 2
    },
    "CN": {
     "n": 200,
@@ -65,19 +65,19 @@
     "flagged": 0
    },
    "FR": {
-    "n": 200,
-    "flagged": 3
+    "n": 199,
+    "flagged": 0
    },
    "GB": {
     "n": 200,
-    "flagged": 1
+    "flagged": 0
    },
    "HK": {
-    "n": 200,
-    "flagged": 1
+    "n": 199,
+    "flagged": 0
    },
    "IN": {
-    "n": 200,
+    "n": 199,
     "flagged": 0
    },
    "IT": {
@@ -85,55 +85,55 @@
     "flagged": 2
    },
    "JP": {
-    "n": 200,
-    "flagged": 0
+    "n": 199,
+    "flagged": 2
    },
    "KR": {
-    "n": 199,
+    "n": 195,
     "flagged": 0
    },
    "NL": {
     "n": 200,
-    "flagged": 1
-   },
-   "SG": {
-    "n": 200,
-    "flagged": 0
-   },
-   "TR": {
-    "n": 199,
-    "flagged": 0
-   },
-   "US": {
-    "n": 200,
-    "flagged": 0
+    "flagged": 2
    },
    "RU": {
     "n": 200,
     "flagged": 0
+   },
+   "SG": {
+    "n": 200,
+    "flagged": 1
+   },
+   "TR": {
+    "n": 200,
+    "flagged": 0
+   },
+   "US": {
+    "n": 200,
+    "flagged": 1
    }
   }
  },
  "people": {
-  "n": 3397,
-  "falsePositives": 55,
-  "sameName": 3,
+  "n": 3392,
+  "falsePositives": 60,
+  "sameName": 8,
   "byCountry": {
    "AE": {
-    "n": 199,
-    "flagged": 22
+    "n": 198,
+    "flagged": 33
    },
    "CH": {
     "n": 200,
     "flagged": 0
    },
    "CN": {
-    "n": 199,
-    "flagged": 6
+    "n": 197,
+    "flagged": 5
    },
    "DE": {
-    "n": 200,
-    "flagged": 1
+    "n": 199,
+    "flagged": 0
    },
    "ES": {
     "n": 200,
@@ -141,11 +141,11 @@
    },
    "FR": {
     "n": 200,
-    "flagged": 1
+    "flagged": 0
    },
    "GB": {
     "n": 200,
-    "flagged": 0
+    "flagged": 1
    },
    "HK": {
     "n": 200,
@@ -153,11 +153,11 @@
    },
    "IN": {
     "n": 200,
-    "flagged": 1
+    "flagged": 0
    },
    "IT": {
     "n": 200,
-    "flagged": 1
+    "flagged": 0
    },
    "JP": {
     "n": 200,
@@ -165,34 +165,34 @@
    },
    "KR": {
     "n": 199,
-    "flagged": 8
+    "flagged": 3
    },
    "NL": {
     "n": 200,
     "flagged": 0
    },
    "RU": {
-    "n": 200,
-    "flagged": 8
+    "n": 199,
+    "flagged": 12
    },
    "SG": {
     "n": 200,
-    "flagged": 5
+    "flagged": 3
    },
    "TR": {
     "n": 200,
-    "flagged": 0
+    "flagged": 2
    },
    "US": {
     "n": 200,
-    "flagged": 1
+    "flagged": 0
    }
   }
  },
- "peopleFalsePositiveRate": 0.01619075654989697,
- "avgMs": 8.768007411410483,
- "queries": 12953,
+ "peopleFalsePositiveRate": 0.01768867924528302,
+ "avgMs": 16.00334370139969,
+ "queries": 12860,
  "measuredAt": "2026-11-26",
  "listPublished": "OFAC 2026-11-23, UK 2026-11-24, EU 2026-11-20",
- "note": "Offline run on Node 24. Positives: 1,500 list entries (seed 11), each searched for by its listed name, an alias and five kinds of variant. Negatives: 3,400 company names and 3,400 person names from 17 countries, none of them used to tune the matcher; 3 of each whose words equal a listed name are counted apart."
+ "note": "Offline run on Node 24. Positives: 1,500 list entries (seed 23), each searched for by its listed name, an alias and five kinds of variant. Negatives: 3,400 company names and 3,400 person names from 17 countries and territories, none of them used to tune the matcher; 9 company names and 8 person names whose words equal a listed name are counted apart."
 }

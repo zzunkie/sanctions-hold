@@ -17,6 +17,17 @@ export async function jira(path, method = 'GET', body) {
   return json;
 }
 
+// Creates a work item at Medium priority, so an onboarding request does not open as Critical on
+// sites whose default is higher; a project without that priority gets its default.
+export async function createIssue(fields) {
+  try {
+    return await jira(route`/rest/api/3/issue`, 'POST', { fields: { ...fields, priority: { name: 'Medium' } } });
+  } catch (e) {
+    if (e.status !== 400 || !/priority/i.test(e.message)) throw e;
+    return jira(route`/rest/api/3/issue`, 'POST', { fields });
+  }
+}
+
 export async function setProperty(issueKey, key, value) {
   await jira(route`/rest/api/3/issue/${issueKey}/properties/${key}`, 'PUT', value);
 }
