@@ -11,7 +11,7 @@ import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
 import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
-import { compareOwner } from './core/evidence.js';
+import { compareOwner, listFacts, birthYearClears } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
 // The EU reference number ("EU.12764.77") that the panel and the Commission's file show for an EU entry.
@@ -51,37 +51,51 @@ export async function screenCounterparty(payload, context) {
   await ensureSchema();
   const name = text(payload?.name);
   if (!name) return { error: 'Give the legal name of the company or person to screen.' };
-  const given = ownersFrom(payload?.owners).map((o) => o.name).slice(0, 10);
+  const givenOwners = ownersFrom(payload?.owners).slice(0, 10);
+  const given = givenOwners.map((o) => o.name);
   const cache = await loadIndex();
   if (!cache) return { error: 'The sanctions lists are not loaded in Sanctions Hold yet.' };
-  const { threshold } = await getPolicy();
+  const policy = await getPolicy();
+  const { threshold } = policy;
   // A vendor already in Sanctions Hold is screened with the owners and directors on its record too,
   // so a call that gives the name alone gets the same matches as the vendor's work item.
   const known = await findKnown(name);
-  const stored = known ? ownerList(known.owners).map((o) => o.name) : [];
+  const storedOwners = known ? ownerList(known.owners) : [];
+  const stored = storedOwners.map((o) => o.name);
   const owners = [...given, ...stored.filter((o) => !given.some((g) => compact(g) === compact(o)))].slice(0, 20);
-  const reviewed = known ? new Map((await counterpartyView(known.id)).hits.filter((h) => h.status !== 'pending').map((h) => [h.entryId, h.status])) : new Map();
+  const bornOf = new Map([...storedOwners, ...givenOwners].filter((o) => o.born).map((o) => [compact(o.name), String(o.born).slice(0, 4)]));
+  // A reviewer's decision on a known vendor's match; one the year-of-birth rule made is decided again below.
+  const reviewed = known ? new Map((await counterpartyView(known.id)).hits.filter((h) => h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year').map((h) => [h.entryId, h.status])) : new Map();
   const found = screenNames(cache.index, [name, ...owners], threshold);
-  // The in-memory index keeps no remarks; read them for EU entries, whose reference number is in the remarks.
+  // The in-memory index keeps no remarks. Read them for EU entries, whose reference number is in the remarks,
+  // and, with the year-of-birth rule on, for entries matched to an owner with a year of birth.
   const euIds = [...found.keys()].filter((id) => cache.index.byEntry.get(id)?.list === 'EU').slice(0, 10);
-  const euRemarks = new Map(euIds.length
-    ? (await q(`SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (${euIds.map(() => '?').join(', ')})`, ...euIds)).map((r) => [r.entry_id, r.remarks])
+  const ruleIds = policy.birthYearRule ? [...found].filter(([, f]) => bornOf.has(compact(f.queriedName))).map(([id]) => id).slice(0, 20) : [];
+  const remarkIds = [...new Set([...euIds, ...ruleIds])];
+  const remarks = new Map(remarkIds.length
+    ? (await q(`SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (${remarkIds.map(() => '?').join(', ')})`, ...remarkIds)).map((r) => [r.entry_id, r.remarks])
     : []);
   const country = text(payload?.country, 60) || null;
   const matches = [...found.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 10).map(([entryId, f]) => {
     const e = cache.index.byEntry.get(entryId);
+    // The same rule a vendor's screening applies: cleared when the year of birth is more than a year from every one on the entry.
+    const born = ruleIds.includes(entryId) ? bornOf.get(compact(f.queriedName)) : null;
+    const listed = born ? listFacts({ remarks: remarks.get(entryId) }).years : [];
+    const byRule = !reviewed.get(entryId) && born && birthYearClears(born, listed);
     return {
-      listEntry: entryId, ...euRef(e && { list: e.list, remarks: euRemarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
+      listEntry: entryId, ...euRef(e && { list: e.list, remarks: remarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
       screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
-      reviewed: reviewed.get(entryId) || null,
+      reviewed: reviewed.get(entryId) || (byRule ? 'year-of-birth rule' : null),
+      ...(byRule ? { yearOfBirthRule: `born ${born}; the list entry gives ${listed.join(', ')}` } : {}),
     };
   });
   const open = matches.filter((m) => !m.reviewed);
   const confirmed = matches.filter((m) => m.reviewed === 'confirmed');
   const REVIEWED = { confirmed: ', confirmed by a reviewer', dismissed: ', dismissed by a reviewer as not the same party' };
   await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version, via: viaOf(payload) }, actor: callerOf(payload, context) || viaOf(payload) });
+  const head = open.length ? 'Possible match' : matches.every((m) => m.yearOfBirthRule) ? `${matches.length === 1 ? 'Match' : 'Matches'} cleared by the year-of-birth rule` : 'Reviewed match';
   const answer = matches.length
-    ? `${open.length ? 'Possible match' : 'Reviewed match'} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || ''}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
+    ? `${head} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || (m.yearOfBirthRule ? `, cleared by the year-of-birth rule (${m.yearOfBirthRule})` : '')}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
     : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists (updated ${cache.state.published})${cache.state.ukPublished ? `, the UK Sanctions List (updated ${cache.state.ukPublished})` : ''}${cache.state.euPublished ? ` or the EU Consolidated Financial Sanctions List (updated ${cache.state.euPublished})` : ''}.`;
   // A known vendor is answered from its record first, where the reviewers' decisions are.
   const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}.${stored.length ? ` Screened with the owners and directors on its record (${stored.join(', ')}).` : ''} ` : '';
@@ -116,7 +130,7 @@ export async function counterpartyStatus(payload) {
   const approval = v.events.find((e) => e.type === 'approved');
   const answer = `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${STATUS_TEXT[cp.status] || cp.status}.`
     + (open.length ? ` ${open.map((h) => (h.status === 'confirmed' ? `Confirmed: ${h.matchedName} (${trimStop(h.reason)})` : `Waiting for review: ${h.matchedName}, score ${Number(h.score).toFixed(2)}`)).join('; ')}.` : '')
-    + (reviewed.length ? ` Dismissed after review: ${reviewed.map((h) => `${h.matchedName} (${trimStop(h.reason)})`).join('; ')}.` : '')
+    + (reviewed.length ? ` Dismissed: ${reviewed.map((h) => `${h.matchedName} (${h.reviewedBy === 'rule:birth-year' ? 'year-of-birth rule: ' : ''}${trimStop(h.reason)})`).join('; ')}.` : '')
     + (OWNERSHIP_REASONS.has(v.assessment?.reason) ? ` ${NEXT[v.assessment.reason]}` : '')
     + (cp.screened_at ? ` Last screened ${cp.screened_at.slice(0, 16).replace('T', ' ')} UTC.` : '');
   return {
@@ -217,7 +231,7 @@ export async function matchEvidence(payload, context) {
     const facts = e ? compareOwner(owner, e) : {};
     return {
       listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
-      review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : 'dismissed as not the same party',
+      review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : 'dismissed as not the same party',
       reviewReason: h.reason || null,
       foundFor: owner
         ? { owner: owner.name, role: owner.role, share: owner.share ?? null, born: owner.born || null, nationality: owner.nationality ? countryNameOf(owner.nationality) : null }
@@ -251,8 +265,9 @@ export async function addReviewNote(payload, context) {
   if (!cp) return { error: `No vendor in Sanctions Hold has the work item ${key}.` };
   const accountId = callerOf(payload, context);
   const from = viaOf(payload) === 'rovo' ? 'Review notes from the Sanctions Hold agent' : 'Review notes posted through the Sanctions Hold MCP tools';
-  await comment(key, accountId ? [`${from}, requested by `, { mention: accountId }, ':'] : `${from}:`,
-    ...notes.split(/\n+/).map((l) => l.trim()).filter(Boolean).slice(0, 40));
+  // One paragraph per block of the notes (one per match), its lines kept as line breaks.
+  const blocks = notes.split(/\n\s*\n/).map((b) => b.split('\n').map((l) => l.trim()).filter(Boolean).join('\n')).filter(Boolean).slice(0, 20);
+  await comment(key, accountId ? [`${from}, requested by `, { mention: accountId }, ':'] : `${from}:`, ...blocks);
   await logEvent({ counterpartyId: cp.id, issueKey: key, type: 'review_note_added', detail: { name: cp.name, length: notes.length, via: viaOf(payload) }, actor: accountId || viaOf(payload) });
   return { added: true, workItem: key, answer: `Added the review notes to ${key} as a comment.` };
 }

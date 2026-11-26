@@ -32,13 +32,14 @@ export async function setProperty(issueKey, key, value) {
   await jira(route`/rest/api/3/issue/${issueKey}/properties/${key}`, 'PUT', value);
 }
 
-// ADF paragraphs; a part may be a string or { mention: accountId }.
+// ADF paragraphs; a part may be a string, where a newline is a line break, or { mention: accountId }.
+const lines = (t) => t.split('\n').flatMap((l, i) => [...(i ? [{ type: 'hardBreak' }] : []), ...(l ? [{ type: 'text', text: l }] : [])]);
 export const adf = (...paragraphs) => ({
   type: 'doc',
   version: 1,
   content: paragraphs.filter(Boolean).map((p) => ({
     type: 'paragraph',
-    content: (Array.isArray(p) ? p : [p]).filter(Boolean).map((x) => (typeof x === 'string' ? { type: 'text', text: x } : { type: 'mention', attrs: { id: x.mention } })),
+    content: (Array.isArray(p) ? p : [p]).filter(Boolean).flatMap((x) => (typeof x === 'string' ? lines(x) : [{ type: 'mention', attrs: { id: x.mention } }])),
   })),
 });
 

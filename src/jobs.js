@@ -5,20 +5,21 @@ import { importLists, checkForUpdate, listState } from './backend/lists.js';
 import { screenCounterparties } from './backend/screening.js';
 import { loadSample } from './backend/counterparties.js';
 import { runSetup } from './backend/setup.js';
-import { runAccuracy } from './backend/accuracy.js';
+import { startAccuracy, runAccuracyPart } from './backend/accuracy.js';
 import { DEMO_HOLD_BACK_FROM } from './core/sample.js';
 
 const queue = new Queue({ key: 'sanctions-jobs' });
 
 export const push = (body, delayInSeconds) => queue.push([{ body, ...(delayInSeconds ? { delayInSeconds } : {}) }]);
 
-async function track(type, fn) {
-  const state = { type, state: 'running', startedAt: new Date().toISOString() };
-  await setSetting(`job:${type}`, state);
+// A job in several parts is marked running by its first invocation; the later ones keep that state.
+async function track(type, fn, { later = false } = {}) {
+  const state = (later && await getSetting(`job:${type}`, null)) || { type, state: 'running', startedAt: new Date().toISOString() };
+  if (!later) await setSetting(`job:${type}`, state);
   try {
     const result = await fn();
-    // A job in several parts stays running until its last part; a part of a replaced run changes nothing.
-    if (result?.next || result?.superseded) return;
+    // The job stays running until its last part; a part of a replaced run changes nothing.
+    if (result?.next || result?.waiting || result?.superseded) return;
     await setSetting(`job:${type}`, { ...state, state: 'done', finishedAt: new Date().toISOString(), result: result || null });
   } catch (e) {
     console.error(type, e);
@@ -27,12 +28,14 @@ async function track(type, fn) {
 }
 
 // The queue consumer stops after 15 minutes; a job still marked as running after that has died.
-const STALE_MS = 16 * 60 * 1000;
+// The accuracy test runs in parts, so it is given longer.
+const STALE_MIN = { accuracy: 45 };
 
 export async function jobState(type) {
   const s = await getSetting(`job:${type}`, null);
-  if (s && (s.state === 'running' || s.state === 'queued') && Date.now() - Date.parse(s.startedAt) > STALE_MS) {
-    return { ...s, state: 'error', error: 'no result after 15 minutes', finishedAt: s.startedAt };
+  const min = STALE_MIN[type] || 16;
+  if (s && (s.state === 'running' || s.state === 'queued') && Date.now() - Date.parse(s.startedAt) > min * 60 * 1000) {
+    return { ...s, state: 'error', error: `no result after ${min} minutes`, finishedAt: s.startedAt };
   }
   return s;
 }
@@ -70,11 +73,17 @@ export async function worker(event) {
   } else if (type === 'setup-jira') {
     await runSetup(event.body);
   } else if (type === 'accuracy') {
+    const { runId } = event.body;
     await track('accuracy', async () => {
-      const r = await runAccuracy(event.body.step || 'positives', Boolean(event.body.cont), event.body.runId || null);
-      if (r.next) await push({ type: 'accuracy', step: r.next, cont: true, runId: r.runId });
+      if (!runId) {
+        const run = await startAccuracy();
+        await queue.push(run.parts.map((p) => ({ body: { type: 'accuracy', runId: run.runId, ...p } })));
+        return { next: true };
+      }
+      const r = await runAccuracyPart(event.body);
+      if (r.next) await push({ type: 'accuracy', ...r.next });
       return r;
-    });
+    }, { later: Boolean(runId) });
   }
 }
 

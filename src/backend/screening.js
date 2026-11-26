@@ -1,13 +1,16 @@
 // Screen counterparties against the loaded lists and keep the review decisions.
 import { screen } from '../core/match.js';
 import { reconcile, statusOf } from '../core/decision.js';
-import { ownerNames } from '../core/owners.js';
+import { ownerNames, ownerList, ownerStrings } from '../core/owners.js';
+import { listFacts, birthYearClears } from '../core/evidence.js';
 import { q, marks, insertMany, logEvents, getSetting, nowDt } from './db.js';
 import { loadIndex } from './screen-index.js';
 import { route } from '@forge/api';
-import { jira, comment, addLabel } from './jira.js';
+import { jira, comment, addLabel, createIssue, setProperty, adf } from './jira.js';
+import { setVendorField } from './vendor-field.js';
 
-export const DEFAULT_POLICY = { threshold: 0.92, ownerRule: 'fifty' };
+export const DEFAULT_POLICY = { threshold: 0.92, ownerRule: 'fifty', birthYearRule: false };
+export const RULE = 'rule:birth-year';
 export async function getPolicy() {
   return { ...DEFAULT_POLICY, ...(await getSetting('policy', {})) };
 }
@@ -61,10 +64,45 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   const statuses = [];
   const approvedMatched = [];
   const newlyHeld = [];
-  for (const cp of cps) {
+  const ruled = [];
+  const unruled = [];
+  const ruleNotes = [];
+  const founds = cps.map((cp) => screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold));
+  // Years of birth on the entries matched to an owner or director with a year of birth, for the year-of-birth rule.
+  const years = new Map();
+  if (policy.birthYearRule) {
+    const ids = [...new Set(cps.flatMap((cp, i) => {
+      const born = new Set(ownerList(cp.owners).filter((o) => o.born).map((o) => o.name.toLowerCase()));
+      return [...founds[i]].filter(([, f]) => born.has(String(f.queriedName).toLowerCase())).map(([id]) => id);
+    }))];
+    for (const e of await rowsIn('SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (?)', ids)) years.set(e.entry_id, listFacts(e).years);
+  }
+  for (const [i, cp] of cps.entries()) {
     const own = hitsBy.get(cp.id) || [];
-    const found = screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold);
+    const found = founds[i];
     const r = reconcile(own, found);
+    // Matches the rule cleared before are decided again on every screening; a reviewer's decisions stay.
+    const owners = new Map(ownerList(cp.owners).map((o) => [o.name.toLowerCase(), o]));
+    const prevOf = new Map(own.map((h) => [h.entry_id, h]));
+    const ruledHere = new Set();
+    const ruleEvents = [];
+    for (const h of r.rows) {
+      const prev = prevOf.get(h.entry_id);
+      const byRule = prev?.reviewed_by === RULE && prev.status === 'dismissed' && h.status === 'dismissed';
+      if (byRule) h.status = 'pending';
+      if (h.status !== 'pending' || (prev?.reviewed_by && prev.reviewed_by !== RULE)) continue;
+      const o = owners.get(String(h.queried_name).toLowerCase());
+      const listed = years.get(h.entry_id) || [];
+      if (policy.birthYearRule && o?.born && birthYearClears(o.born, listed)) {
+        h.status = 'dismissed';
+        ruledHere.add(h.entry_id);
+        ruled.push([cp.id, h.entry_id, o.born, listed.join(', ')]);
+        if (!byRule) ruleEvents.push({ counterpartyId: cp.id, entryId: h.entry_id, issueKey: cp.issue_key, actor: RULE, type: 'match_dismissed', detail: { matchedName: h.matched_name, score: h.score, reason: `${o.name}, born ${String(o.born).slice(0, 4)}; the list entry gives ${listed.join(', ')}.`, listVersion: version } });
+      } else if (byRule) {
+        unruled.push([cp.id, h.entry_id]);
+        r.opened.push({ entryId: h.entry_id, reopened: true, matchedName: h.matched_name, queriedName: h.queried_name, score: h.score, entryHash: h.entry_hash });
+      }
+    }
     const opened = new Set(r.opened.map((o) => o.entryId));
     for (const h of r.rows) {
       const vals = [cp.id, h.entry_id, h.queried_name, h.matched_name, h.score, h.status, 1, h.entry_hash, now, version];
@@ -84,15 +122,29 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
         detail: { matchedName: o.matchedName, queriedName: o.queriedName, score: o.score, listVersion: version, reason },
       });
     }
+    events.push(...ruleEvents);
+    // Each line names the entry as the panel does, with the alias it matched on when that differs.
+    const noteLine = (e) => {
+      const listed = cache.index.byEntry.get(e.entryId)?.name || e.detail.matchedName;
+      return `${listed} (${e.entryId}${listed !== e.detail.matchedName ? `, matched on ${e.detail.matchedName}` : ''}): ${e.detail.reason}`;
+    };
+    if (cp.issue_key && ruleEvents.length) ruleNotes.push([cp.issue_key, ruleEvents.map(noteLine)]);
     if (status !== cp.status) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: version } });
     if (ids) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
-    if (cp.approved_at && r.opened.length) approvedMatched.push({ cp, opened: r.opened });
+    const stillOpen = r.opened.filter((o) => !ruledHere.has(o.entryId));
+    if (cp.approved_at && stillOpen.length) approvedMatched.push({ cp, opened: stillOpen });
     else if (cp.issue_key && status !== cp.status && (status === 'blocked' || cp.status === 'blocked' || (!cp.approved_at && status === 'review'))) newlyHeld.push([cp.issue_key, cp.status, status]);
   }
   const update = `ON DUPLICATE KEY UPDATE queried_name = VALUES(queried_name), matched_name = VALUES(matched_name), score = VALUES(score),
                   status = VALUES(status), active = 1, entry_hash = VALUES(entry_hash)`;
   await insertMany('hit', HIT_COLS, fresh, { onDuplicate: `${update}, found_at = VALUES(found_at), found_version = VALUES(found_version)` });
   await insertMany('hit', HIT_COLS, kept, { onDuplicate: update });
+  const at = nowDt();
+  for (const [cpId, entryId, born, listed] of ruled) {
+    await q('UPDATE hit SET reviewed_by = ?, reviewed_at = ?, reason = ? WHERE counterparty_id = ? AND entry_id = ? AND (reviewed_by IS NULL OR reviewed_by = ?)',
+      RULE, at, `Year of birth ${String(born).slice(0, 4)}; the list entry gives ${listed}.`, cpId, entryId, RULE);
+  }
+  for (const [cpId, entryId] of unruled) await q('UPDATE hit SET reviewed_by = NULL, reviewed_at = NULL, reason = NULL WHERE counterparty_id = ? AND entry_id = ? AND reviewed_by = ?', cpId, entryId, RULE);
   for (let i = 0; i < lapsed.length; i += 200) {
     const part = lapsed.slice(i, i + 200);
     await q(`UPDATE hit SET active = 0 WHERE (counterparty_id, entry_id) IN (${part.map(() => '(?, ?)').join(', ')})`, ...part.flat());
@@ -104,13 +156,35 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   }
   if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
   await logEvents(events);
+  for (const [k, lines] of ruleNotes) await comment(k, `Sanctions Hold: the year-of-birth rule cleared ${lines.length === 1 ? 'this possible match' : 'these possible matches'}.`, ...lines).catch((e) => console.error('rule note', k, e.message));
   for (const m of approvedMatched) await notifyApprovedMatch(m, cache).catch((e) => console.error('notify', m.cp.issue_key, e.message));
   for (const [k, from, to] of newlyHeld) await syncWorkItem(k, from, to).catch((e) => console.error('hold', k, e.message));
   return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
 }
 
+// An approved vendor without a work item (approved before Sanctions Hold, or imported) gets one in the
+// onboarding project, so that the new match has a place for its review.
+async function openReviewItem(cp) {
+  const onboarding = await getSetting('onboarding', null);
+  if (!onboarding?.projectKey) return null;
+  const approved = cp.approved_at ? new Date(cp.approved_at).toISOString().slice(0, 10) : null;
+  const issue = await createIssue({
+    project: { key: onboarding.projectKey },
+    issuetype: { id: onboarding.taskTypeId },
+    summary: cp.name.slice(0, 250),
+    labels: cp.source === 'sample' ? ['sanctions-hold-sample'] : [],
+    description: adf(`Opened by Sanctions Hold for an approved vendor${approved ? ` (approved ${approved})` : ''} that had no onboarding work item, because a list update has a possible match for it.`),
+  });
+  // Linked first, so the work item's created event finds the vendor instead of adding a second one.
+  await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, cp.id);
+  await setVendorField(issue.key, { country: cp.country, owners: ownerStrings(cp.owners) }).catch((e) => console.error('vendor field', issue.key, e.message));
+  await setProperty(issue.key, 'sanctions-hold-counterparty', { counterpartyId: cp.id }).catch(() => null);
+  return issue.key;
+}
+
 // An approved vendor matched by a list update: say so on its onboarding work item.
 async function notifyApprovedMatch({ cp, opened }, cache) {
+  if (!cp.issue_key) cp.issue_key = await openReviewItem(cp);
   if (!cp.issue_key) return;
   const lines = opened.map((o) => {
     const e = cache.index.byEntry.get(o.entryId);

@@ -141,6 +141,7 @@ const eventLabel = (e) => {
   if (via && e.type === 'screened_by_tool') return `Screened by ${via}`;
   if (via && e.type === 'counterparty_added') return `Request opened by ${via}`;
   if (via && e.type === 'review_note_added') return `Review notes by ${via}`;
+  if (e.type === 'match_dismissed' && e.actor === 'rule:birth-year') return 'Cleared by the year-of-birth rule';
   return EVENT_TEXT[e.type] || e.type;
 };
 
@@ -340,7 +341,7 @@ function VendorModal({ id, onClose }) {
             <OwnershipNote view={view} onDone={() => { setChanged(true); load(); }} />
             {view.hits.map((h) => (
               <Stack key={h.entryId} space="space.100">
-                <Inline space="space.100" alignBlock="center"><HitLozenge status={h.status} person={h.queriedName !== cp.name} />{!h.active && h.status !== 'confirmed' ? <Text color="color.text.subtle">no longer matches</Text> : null}</Inline>
+                <Inline space="space.100" alignBlock="center"><HitLozenge status={h.status} person={h.queriedName !== cp.name} reviewedBy={h.reviewedBy} />{!h.active && h.status !== 'confirmed' ? <Text color="color.text.subtle">no longer matches</Text> : null}</Inline>
                 <MatchEvidence hit={h} cp={cp} />
                 <ReviewedNote hit={h} />
                 {h.status === 'pending' && h.active ? <ReviewForm hit={h} cp={cp} onDone={() => { setChanged(true); load(); }} /> : null}
@@ -429,7 +430,7 @@ function ListUpdates({ stamp }) {
   const matched = latest ? data.matched.filter((m) => m.found_version === latest.id) : [];
   return (
     <Stack space="space.300">
-      <Text color="color.text.subtle">The app checks the OFAC Sanctions List Service, the UK Sanctions List and the EU Financial Sanctions Files for a new version every hour and imports them when a file has changed. Entries are compared by OFAC entry number, UK Unique ID or EU entity ID, so additions, removals and changes to names, aliases, programs or regimes, and countries are recorded. The UK Sanctions List contains public sector information licensed under the Open Government Licence v3.0. The EU list is reused from the European Commission's Financial Sanctions Files; only the texts published in the Official Journal of the EU are authentic.</Text>
+      <Text color="color.text.subtle">Every hour the app checks the OFAC, UK and EU list files for a new version and imports a changed file. Entries are compared by their list ID, so added, removed and changed names, aliases, programs or regimes and countries are recorded.</Text>
       <DynamicTable
         head={{ cells: [{ key: 'p', content: 'Lists updated' }, { key: 'l', content: 'Loaded (UTC)' }, { key: 'e', content: 'Entries' }, { key: 'a', content: 'Added' }, { key: 'r', content: 'Removed' }, { key: 'c', content: 'Changed' }, { key: 'n', content: 'Note' }] }}
         // Non-breaking hyphens keep each list date on one line in the narrow first column.
@@ -446,7 +447,7 @@ function ListUpdates({ stamp }) {
               head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'w', content: 'Work item' }, { key: 'a', content: 'Approved' }, { key: 'm', content: 'List entry' }, { key: 's', content: 'Score' }, { key: 'h', content: 'Review' }] }}
               rows={matched.map((m) => ({ key: `${m.id}-${m.entry_id}`, cells: [
                 { key: 'v', content: m.name }, { key: 'w', content: <IssueLink k={m.issue_key} /> }, { key: 'a', content: fmtDate(m.approved_at) },
-                { key: 'm', content: m.matched_name }, { key: 's', content: score(m.score) }, { key: 'h', content: <HitLozenge status={m.status} /> },
+                { key: 'm', content: m.matched_name }, { key: 's', content: score(m.score) }, { key: 'h', content: <HitLozenge status={m.status} reviewedBy={m.reviewed_by} /> },
               ] }))}
             />
           ) : <Text>No vendor matches the changed entries.</Text>}
@@ -461,6 +462,7 @@ function ListUpdates({ stamp }) {
           />
         </Stack>
       ) : <Text>No update since the first import.</Text>}
+      <Text color="color.text.subtle" size="small">Sources: OFAC Sanctions List Service; UK Sanctions List, public sector information licensed under the Open Government Licence v3.0; EU Financial Sanctions Files, reused from the European Commission (only the texts published in the Official Journal of the EU are authentic).</Text>
     </Stack>
   );
 }
@@ -491,6 +493,7 @@ function AccuracyTable({ runs }) {
         { key: 'all', cells: [{ key: 'k', content: <Strong>All list-name queries (recall)</Strong> }, ...cells('all', (r) => ({ n: r.total.n, f: r.total.found }), true)] },
         { key: 'neg', cells: [{ key: 'k', content: <Strong>Real company names not on the lists, flagged (false positives)</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
         { key: 'ppl', cells: [{ key: 'k', content: <Strong>Real person names not on the lists, flagged (false positives)</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
+        ...(runs.some(({ r }) => r.peopleAfterBirthYearRule) ? [{ key: 'ppl-year', cells: [{ key: 'k', content: 'The same people, with the year-of-birth rule on (see Settings)' }, ...cells('ppl-year', (r) => r.people && r.peopleAfterBirthYearRule && { n: r.people.n, f: r.peopleAfterBirthYearRule.left })] }] : []),
       ]}
     />
   );
@@ -502,10 +505,12 @@ const countryCounts = (by) => Object.entries(by || {}).filter(([, c]) => c.flagg
 function ByCountry({ r }) {
   const companies = countryCounts(r.negatives?.byCountry);
   const people = countryCounts(r.people?.byCountry);
+  const left = r.peopleAfterBirthYearRule?.byCountry || null;
+  const rule = left ? Object.entries(left).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, n]) => `${k} ${n} of ${r.people.byCountry[k]?.n ?? '?'}`).join(', ') : '';
   return (
     <>
       {companies ? <Text color="color.text.subtle">{`Flagged company names by country: ${companies}.`}</Text> : null}
-      {people ? <Text color="color.text.subtle">{`Flagged person names by country: ${people}.`}</Text> : null}
+      {people ? <Text color="color.text.subtle">{`Flagged person names by country: ${people}.${left ? ` With the year-of-birth rule on: ${rule || 'none'}.` : ''}`}</Text> : null}
     </>
   );
 }
@@ -513,6 +518,7 @@ function ByCountry({ r }) {
 function Accuracy({ onStarted, finishedAt }) {
   const { data, loading, error } = useLoad('accuracy', {}, [finishedAt]);
   const [busy, setBusy] = useState(false);
+  const [method, setMethod] = useState(false);
   if (loading && !data) return <Spinner label="Loading" />;
   if (error) return <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage>;
   const { offline, last } = data;
@@ -522,12 +528,13 @@ function Accuracy({ onStarted, finishedAt }) {
     <Stack space="space.200">
       <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
-      {last ? <Text color="color.text.subtle">{`On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, with its own random draw of list entries and the same real names; ${num(last.queries)} searches against ${num(last.listNames)} list names, ${last.avgMs.toFixed(1)} ms each on average.`}</Text> : <Text color="color.text.subtle">Not run on this site yet.</Text>}
-      <Text color="color.text.subtle">{`Held-out sample, not used for tuning: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}. ${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text>
+      <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
       <ByCountry r={shown} />
       {last?.fpSamples?.length ? <Text color="color.text.subtle">{`Flagged company names: ${last.fpSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
       {last?.peopleSamples?.length ? <Text color="color.text.subtle">{`Flagged person names: ${last.peopleSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
-      <Inline><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button></Inline>
+      <Inline space="space.100"><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button>
+        <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide how the samples were drawn' : 'How the samples were drawn'}</Button></Inline>
+      {method ? <Text color="color.text.subtle">{`${last ? `On this site, the list entries are a random draw of their own from the lists as loaded, the real names are the same, and a search took ${last.avgMs.toFixed(1)} ms on average against ${num(last.listNames)} list names. ` : ''}${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text> : null}
     </Stack>
   );
 }
@@ -543,13 +550,18 @@ const THRESHOLDS = [
   { value: 0.94, label: '0.94: fewer reviews (99.4% recall; 0.2% of companies, 1.6% of people flagged)' },
 ];
 
+const BIRTH_YEAR = [
+  { value: 'off', label: 'Off (default): a reviewer decides every possible match' },
+  { value: 'on', label: 'On: clear matches whose year of birth is more than a year apart' },
+];
+
 function Settings({ onChange, onRemoved, stamp }) {
   const { data, loading, reload } = useLoad('getSettings', {}, [stamp]);
   const [msg, setMsg] = useState(null);
   const [audit, setAudit] = useState(null);
   const [busy, setBusy] = useState(null);
   const save = async (patch) => {
-    try { await call('saveSettings', patch); setMsg({ appearance: 'success', text: 'Saved. Every vendor is screened again with the new setting.' }); reload(); onChange(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
+    try { await call('saveSettings', { threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, birthYearRule: data.policy.birthYearRule, ...patch }); setMsg({ appearance: 'success', text: 'Saved. Every vendor is screened again with the new setting.' }); reload(); onChange(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
   };
   if (loading || !data) return <Spinner label="Loading settings" />;
   const current = THRESHOLDS.find((t) => t.value === data.policy.threshold) || { value: data.policy.threshold, label: String(data.policy.threshold) };
@@ -562,12 +574,17 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Listed owners and directors</Heading>
-        <Text color="color.text.subtle">Choose how a confirmed listed owner or director affects the vendor. With the ownership rules, the vendor is blocked when confirmed OFAC-listed owners hold 50% or more in the aggregate (OFAC's 50 Percent Rule), when confirmed EU-listed owners hold 50% or more in the aggregate (Council of the EU Best Practices, 2024), when one confirmed UK-listed owner holds more than 50% (the UK adds up separate holdings only under a joint arrangement), or when a confirmed owner's share is not given. When none of these rules blocks the vendor, and for directors, a reviewer decides whether to proceed or block.</Text>
+        <Text color="color.text.subtle">With the ownership rules, confirmed owners block the vendor under the rule of the list that names them: OFAC-listed or EU-listed owners holding 50% or more together, or one UK-listed owner holding more than 50%. A confirmed owner without a share also blocks. Otherwise, and for directors, a reviewer decides whether to proceed or block.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="owner-rule" value={OWNER_RULES.find((r) => r.value === (data.policy.ownerRule || 'fifty'))} options={OWNER_RULES} onChange={(o) => o && save({ threshold: data.policy.threshold, ownerRule: o.value })} /></Box>
       </Stack>
       <Stack space="space.100">
+        <Heading size="small">Year of birth</Heading>
+        <Text color="color.text.subtle">With the rule on, a possible match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. The audit record and the work item note each match the rule cleared, and the match comes back for review if the year of birth or the list entry changes.</Text>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
+      </Stack>
+      <Stack space="space.100">
         <Heading size="small">Projects screened automatically</Heading>
-        <Text color="color.text.subtle">A work item created in these projects is screened under its summary, the vendor's legal name (a "New vendor:" prefix is left out), with the country, owners and directors in its Vendor details field. Without the field, "Country:" and "Owners:" lines in the description are read.</Text>
+        <Text color="color.text.subtle">A work item created in these projects is screened under its summary, the vendor's legal name, with the country, owners and directors in its Vendor details field.</Text>
         <Box xcss={xcss({ width: '480px' })}>
           <Select inputId="projects" isMulti value={data.projects.map((p) => ({ label: p, value: p }))} options={data.available.map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }))} onChange={(o) => save({ threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, projects: (o || []).map((x) => x.value) })} />
         </Box>

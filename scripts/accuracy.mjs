@@ -9,6 +9,7 @@ import { parseUkXml } from '../src/core/uk.js';
 import { parseEuXml } from '../src/core/eu.js';
 import { buildIndex } from '../src/core/match.js';
 import { evaluate } from '../src/core/accuracy.js';
+import { listFacts } from '../src/core/evidence.js';
 
 const [ofacDir, negDir, thArg] = process.argv.slice(2);
 const threshold = Number(thArg || 0.92);
@@ -46,7 +47,9 @@ for (const f of negFiles) {
 // PEOPLE=<people json> adds real person names not on the lists as a second negative sample.
 const peopleFile = process.env.PEOPLE ? JSON.parse(readFileSync(process.env.PEOPLE, 'utf8')) : null;
 const people = peopleFile && (Array.isArray(peopleFile) ? peopleFile : peopleFile.names);
-const r = evaluate(index, entries, aliasesById, negatives, { threshold, sample: Number(process.env.SAMPLE || 1500), seed: Number(process.env.SEED || 42), people });
+const byId = new Map(entries.map((e) => [e.id, e]));
+const yearsOf = (id) => listFacts(byId.get(id)).years;
+const r = evaluate(index, entries, aliasesById, negatives, { threshold, sample: Number(process.env.SAMPLE || 1500), seed: Number(process.env.SEED || 42), people, yearsOf });
 if (process.env.JSON) { console.log(JSON.stringify(r, null, 1)); process.exit(0); }
 const pct = (a, b) => `${((100 * a) / b).toFixed(1)}%`;
 console.log(`threshold ${threshold}; list names indexed ${index.N} (entries ${entries.length}, aliases ${aliases.length}); index build ${buildMs} ms`);
@@ -54,6 +57,7 @@ for (const [k, s] of Object.entries(r.positives)) console.log(`recall ${k.padEnd
 console.log(`recall all              ${pct(r.total.found, r.total.n)} (${r.total.found}/${r.total.n})`);
 console.log(`false positives         ${pct(r.negatives.falsePositives, r.negatives.n)} (${r.negatives.falsePositives}/${r.negatives.n} real company names; ${r.negatives.sameName} more share a list name: ${r.sameSamples.join(' | ')})`);
 if (r.people) console.log(`false positives people  ${pct(r.people.falsePositives, r.people.n)} (${r.people.falsePositives}/${r.people.n} real person names; ${r.people.sameName} more share a list name)`);
+if (r.peopleAfterBirthYearRule) console.log(`  with year-of-birth rule ${pct(r.peopleAfterBirthYearRule.left, r.people.n)} (${r.peopleAfterBirthYearRule.left}/${r.people.n}; ${JSON.stringify(r.peopleAfterBirthYearRule.byCountry)})`);
 console.log(`avg screen time         ${r.avgMs.toFixed(2)} ms over ${r.queries} queries`);
 for (const [k, m] of Object.entries(r.misses)) { console.log(`-- missed ${k}`); m.forEach((x) => console.log(`    ${x.query}  ->  ${x.expected}${x.top ? `  (top: ${x.top})` : ''}`)); }
 console.log('-- false positive samples'); r.fpSamples.forEach((x) => console.log(`    ${x.name} [${x.country}] -> ${x.matched} ${x.score}`));

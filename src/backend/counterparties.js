@@ -10,7 +10,7 @@ import { syncWorkItem } from './screening.js';
 const clean = (s, n = 400) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const country = (c) => clean(c, 8).toUpperCase() || null;
 const owners = (o) => ownerStrings(o).map((s) => clean(s, 200));
-const policy = async () => ({ threshold: 0.92, ownerRule: 'fifty', ...(await getSetting('policy', {})) });
+const policy = async () => ({ threshold: 0.92, ownerRule: 'fifty', birthYearRule: false, ...(await getSetting('policy', {})) });
 
 export async function createCounterparty({ name, country: c, owners: o, issueKey = null, source, approvedAt = null }, actor = null) {
   const id = crypto.randomUUID();

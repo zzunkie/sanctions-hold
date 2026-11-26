@@ -147,7 +147,7 @@ modules:
       conversationStarters:
         - Can we buy from Rheinhafen Steel Supply in Duisburg? Evgeny Zubitskiy owns 55%.
         - Prepare the review notes for Savannah Freight Ltd.
-        - Did this week's list updates affect any of our vendors?
+        - Did this week's list updates affect our vendors? Prepare notes for new matches.
       actions:
         - screen-counterparty
         - request-approval

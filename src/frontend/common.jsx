@@ -33,8 +33,9 @@ const HIT = {
   dismissed: { label: 'Not the same party', person: 'Not the same person', appearance: 'default' },
   confirmed: { label: 'Same party', person: 'Same person', appearance: 'removed' },
 };
-export const HitLozenge = ({ status, person = false }) => {
-  const s = HIT[status] || { label: status, appearance: 'default' };
+// A match the year-of-birth rule cleared is labeled as such, not as a reviewer's decision.
+export const HitLozenge = ({ status, person = false, reviewedBy = null }) => {
+  const s = reviewedBy === 'rule:birth-year' && status === 'dismissed' ? { label: 'Cleared by the year-of-birth rule', appearance: 'default' } : HIT[status] || { label: status, appearance: 'default' };
   return <Lozenge appearance={s.appearance}>{(person && s.person) || s.label}</Lozenge>;
 };
 
@@ -113,17 +114,17 @@ export function MatchEvidence({ hit, cp, compact = false }) {
     // For an owner or director the company's country says nothing about the person; nationality does.
     ...(owner ? [] : [row('c', 'Country', countryName(cp.country) || 'not given',
       <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'success'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
-    row('t', 'Type', owner ? 'person' : 'company', e.kind),
+    // The kind only says something when it does not fit: a person matched to a company entry, or the reverse.
+    ...((owner ? e.kind !== 'individual' : e.kind === 'individual') ? [row('t', 'Type', owner ? 'person' : 'company', e.kind)] : []),
     ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),
     ...(e.kind === 'individual' && (facts.nationality || owner?.nationality) ? [row('i', 'Nationality', countryName(owner?.nationality) || 'not given', withTag(facts.nationality || 'none given', facts.nationalityCompared))] : []),
-    row('p', e.list === 'UK' || e.list === 'EU' ? 'Regime' : 'Program', '', e.programs || 'none given'),
-    row('a', 'Address', '', places.length ? places.join(' | ') : 'none given'),
   ];
   return (
     <Stack space="space.075">
-      <Text>{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed from the list'}. Score ${score(hit.score)}${hit.matchedName !== e.name ? ', matched on an alias' : ''}.`}</Text>
+      <Text>{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed from the list'}, ${e.list === 'UK' || e.list === 'EU' ? 'regime' : 'program'} ${e.programs || 'not given'}. Score ${score(hit.score)}${hit.matchedName !== e.name ? ', matched on an alias' : ''}.`}</Text>
       <DynamicTable head={{ cells: [{ key: 'l', content: '', width: 26 }, { key: 'v', content: 'This vendor', width: 37 }, { key: 'e', content: 'List entry', width: 37 }] }} rows={rows} />
       {aliases.length ? <Text color="color.text.subtle">{`Also known as: ${aliases.join('; ')}`}</Text> : null}
+      {places.length ? <Text color="color.text.subtle">{`Addresses on the entry: ${places.join(' | ')}`}</Text> : null}
       {e.remarks ? <Text color="color.text.subtle">{`${e.list === 'UK' ? 'UK list details' : e.list === 'EU' ? 'EU list details' : 'OFAC remarks'}: ${clip(e.remarks.replace(/^EU reference number \S+?(; |$)/, ''), 600)}`}</Text> : null}
     </Stack>
   );
@@ -146,10 +147,10 @@ export function ReviewForm({ hit, cp, onDone }) {
   return (
     <Stack space="space.100">
       <Label labelFor={`reason-${hit.entryId}`}>Reason (kept in the audit record)</Label>
-      <TextArea id={`reason-${hit.entryId}`} placeholder={person ? 'For example: different date of birth and nationality' : 'For example: different country and registration number, no common owners'} onChange={(ev) => setReason(ev.target.value)} />
+      <TextArea id={`reason-${hit.entryId}`} placeholder={person ? 'For example: passport checked against the date of birth and nationality on the entry' : 'For example: registration number and owners checked against the entry'} onChange={(ev) => setReason(ev.target.value)} />
       <Inline space="space.100">
         <Button isLoading={busy === 'dismissed'} onClick={() => decide('dismissed')}>{person ? 'Not the same person' : 'Not the same party'}</Button>
-        <Button appearance="danger" isLoading={busy === 'confirmed'} onClick={() => decide('confirmed')}>{person ? 'Same person' : 'Same party'}</Button>
+        <Button isLoading={busy === 'confirmed'} onClick={() => decide('confirmed')}>{person ? 'Same person' : 'Same party'}</Button>
       </Inline>
       {error ? <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage> : null}
     </Stack>
@@ -223,6 +224,7 @@ export function OwnershipNote({ view, onDone }) {
 
 export function ReviewedNote({ hit }) {
   if (!hit.reviewedAt) return null;
+  if (hit.reviewedBy === 'rule:birth-year' && hit.status === 'dismissed') return <Text color="color.text.subtle">{`Cleared by the year-of-birth rule on ${fmtDate(hit.reviewedAt)}: ${hit.reason}`}</Text>;
   const was = hit.status === 'pending' ? 'Reviewed before; the list entry changed since. Earlier decision' : 'Decision';
   return <Text color="color.text.subtle">{`${was} on ${fmtDate(hit.reviewedAt)}: ${hit.reason || 'no reason given'}`}</Text>;
 }

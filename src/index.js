@@ -31,7 +31,7 @@ const JOBS = ['import', 'rescreen', 'start-demo', 'accuracy'];
 define('overview', async () => {
   const [c, list, check, setup, onboarding, queue, recent] = await Promise.all([
     counts(), listState(), getSetting('listCheck', null), setupStatus(), getSetting('onboarding', null), reviewQueue(),
-    q(`SELECT l.at, l.type, l.issue_key, l.entry_id, l.detail, l.actor, c.name FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
+    q(`SELECT l.at, l.type, COALESCE(l.issue_key, c.issue_key) AS issue_key, l.entry_id, l.detail, l.actor, c.name FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
        WHERE l.type IN ('match_found', 'match_reopened', 'match_dismissed', 'match_confirmed', 'approval_blocked', 'approved', 'list_updated', 'rescreen_all', 'screened_by_tool', 'review_note_added')
           OR (l.type = 'counterparty_added' AND (l.detail LIKE '%"source":"mcp"%' OR l.detail LIKE '%"source":"rovo"%'))
        ORDER BY l.at DESC LIMIT 15`),
@@ -89,9 +89,12 @@ define('listUpdates', async () => {
   const versions = await q('SELECT * FROM list_version ORDER BY fetched_at DESC LIMIT 30');
   const changes = await q(`SELECT ch.version_id, ch.change_type, ch.entry_id, ch.name, ch.programs, e.countries, e.kind FROM list_change ch
                            LEFT JOIN list_entry e ON e.entry_id = ch.entry_id ORDER BY ch.at DESC LIMIT 300`);
-  const matched = await q(`SELECT h.found_version, h.entry_id, h.matched_name, h.score, h.status, c.id, c.name, c.issue_key, c.approved_at
-                           FROM hit h JOIN counterparty c ON c.id = h.counterparty_id
-                           WHERE h.found_version IN (SELECT id FROM list_version) ORDER BY h.found_at DESC LIMIT 300`);
+  // Vendors already in Sanctions Hold when an update loaded, matched to an entry that update added or changed.
+  const matched = await q(`SELECT h.found_version, h.entry_id, h.matched_name, h.score, h.status, h.reviewed_by, c.id, c.name, c.issue_key, c.approved_at
+                           FROM hit h JOIN counterparty c ON c.id = h.counterparty_id JOIN list_version v ON v.id = h.found_version
+                           WHERE c.created_at <= v.fetched_at
+                             AND EXISTS (SELECT 1 FROM list_change ch WHERE ch.version_id = h.found_version AND ch.entry_id = h.entry_id)
+                           ORDER BY h.found_at DESC LIMIT 300`);
   return {
     list: await listState(),
     check: await getSetting('listCheck', null),
@@ -105,13 +108,15 @@ define('accuracy', async () => accuracyView());
 define('runAccuracy', async () => { await queueJob('accuracy'); return {}; });
 
 define('getSettings', async () => ({ policy: await getPolicy(), projects: await getSetting('projects', []), available: await listProjects().catch(() => []) }));
-define('saveSettings', async ({ threshold, projects, ownerRule }, ctx) => {
+define('saveSettings', async ({ threshold, projects, ownerRule, birthYearRule }, ctx) => {
   const t = Number(threshold);
   if (!(t >= 0.85 && t <= 0.98)) throw new Error('The threshold must be between 0.85 and 0.98.');
   const before = await getPolicy();
   const rule = ownerRule === 'any' ? 'any' : 'fifty';
-  await setSetting('policy', { ...before, threshold: t, ownerRule: rule });
+  const yearRule = birthYearRule === undefined ? Boolean(before.birthYearRule) : Boolean(birthYearRule);
+  await setSetting('policy', { ...before, threshold: t, ownerRule: rule, birthYearRule: yearRule });
   if (rule !== before.ownerRule) await queueJob('rescreen', { reason: `owner rule ${before.ownerRule} -> ${rule} by ${ctx.accountId}` });
+  else if (yearRule !== Boolean(before.birthYearRule)) await queueJob('rescreen', { reason: `year-of-birth rule ${yearRule ? 'on' : 'off'} by ${ctx.accountId}` });
   if (Array.isArray(projects)) await setSetting('projects', projects.map((p) => String(p).toUpperCase()).slice(0, 20));
   if (t !== before.threshold) await queueJob('rescreen', { reason: `threshold ${before.threshold} -> ${t} by ${ctx.accountId}` });
   return {};

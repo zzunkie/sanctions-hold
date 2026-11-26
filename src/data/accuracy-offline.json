@@ -194,5 +194,14 @@
  "queries": 12860,
  "measuredAt": "2026-11-26",
  "listPublished": "OFAC 2026-11-23, UK 2026-11-24, EU 2026-11-20",
- "note": "Offline run on Node 24. Positives: 1,500 list entries (seed 23), each searched for by its listed name, an alias and five kinds of variant. Negatives: 3,400 company names and 3,400 person names from 17 countries and territories, none of them used to tune the matcher; 9 company names and 8 person names whose words equal a listed name are counted apart."
+ "note": "Offline run on Node 24. Positives: 1,500 list entries (seed 23), each searched for by its listed name, an alias and five kinds of variant. Negatives: 3,400 company names and 3,400 person names from 17 countries and territories, none of them used to tune the matcher; 9 company names and 8 person names whose words equal a listed name are counted apart. Person names carry the year of birth Wikidata gives; with the year-of-birth rule on, 15 of the 60 flagged people stay in review.",
+ "peopleAfterBirthYearRule": {
+  "left": 15,
+  "byCountry": {
+   "AE": 8,
+   "CN": 1,
+   "KR": 1,
+   "RU": 5
+  }
+ }
 }

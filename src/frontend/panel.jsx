@@ -39,7 +39,9 @@ function Panel() {
   if (data === undefined && !error) return <Spinner label="Loading sanctions screening" />;
   const view = data?.view;
   const cp = view?.counterparty;
-  const open = (view?.hits || []).filter((h) => h.status === 'confirmed' || h.active);
+  // Matches waiting for a decision first, then confirmed ones, then dismissed ones.
+  const ORDER = { pending: 0, confirmed: 1, dismissed: 2 };
+  const open = (view?.hits || []).filter((h) => h.status === 'confirmed' || h.active).sort((a, b) => (ORDER[a.status] ?? 3) - (ORDER[b.status] ?? 3));
   const fields = form ? (
     <Stack space="space.100">
       <Stack space="space.050"><Label labelFor="pname">Vendor legal name</Label><Textfield id="pname" defaultValue={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Stack>
@@ -63,8 +65,8 @@ function Panel() {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
-                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? 'Dismissed match' : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
-                {h.status !== 'pending' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
+                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? (h.reviewedBy === 'rule:birth-year' ? 'Cleared match' : 'Dismissed match') : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
+                {h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} compact={compact} />
                 <ReviewedNote hit={h} />
                 {h.status === 'pending' ? <ReviewForm hit={h} cp={cp} onDone={load} /> : null}

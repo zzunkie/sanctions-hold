@@ -12,8 +12,9 @@ Built for Atlassian Codegeist 2026 (Apps for Business Teams; bonus: Best app wit
 - Ownership rules from the list that names a confirmed owner: OFAC's 50 Percent Rule (listed owners holding 50% or more in the aggregate), the EU rule (listed owners holding 50% or more in the aggregate, from the Council of the EU's Best Practices of July 2024, with control criteria the panel asks the reviewer to check) and the UK test (one listed owner holding more than 50%; separate holdings are added up only under a joint arrangement, which the panel asks the reviewer to check). When none of those rules blocks the vendor, and for a listed director, the reviewer chooses to proceed or to block, with a reason.
 - Jira setup in one click: a company-managed "Vendor onboarding" project whose Approve transition runs the app's `jira:workflowValidator`, "Sanctions review" and "Blocked" statuses, and a "Close without approval" transition. Work items created in the projects you choose are screened under their summary, the vendor's legal name, with the Vendor details field. A new vendor with a possible match moves to Sanctions review, and a vendor that a confirmed match blocks moves to Blocked.
 - A Sanctions Hold panel in the work item's right sidebar with the vendor's status and each possible match, and a wider one from the work item's Apps button with the evidence side by side: name, country, date of birth and nationality where the list gives them, program or regime, aliases, addresses and the list's remarks. An owner's year of birth and nationality are marked "same" or "differs" against the list entry. The reviewer marks each possible match as the same party or not, with a reason that goes into the audit record and onto the work item as a comment.
-- After each list update every vendor is screened again. An approved vendor with a new possible match moves back to Sanctions review and its work item gets a comment. A dismissed match comes back for review when its list entry changes.
-- An accuracy test that runs inside the site on the lists as loaded.
+- An optional year-of-birth rule in Settings (off by default): when an owner or director has a year of birth, the list entry gives a date of birth, and the person's year is more than one year from every date of birth on the entry, the possible match is cleared, and both years are recorded in the audit record, on the panel and in a comment on the work item. Matches a reviewer has decided are left as they are. Screening through the Rovo agent and the MCP tools applies the same rule.
+- After each list update every vendor is screened again. An approved vendor with a new possible match moves back to Sanctions review and its work item gets a comment; an approved vendor without a work item gets one in the onboarding project. A dismissed match comes back for review when its list entry changes.
+- An accuracy test that runs inside the site on the lists as loaded, split into parts that run at the same time on the queue.
 - An audit record as CSV: screenings, possible matches, decisions with reasons, blocked approvals, approvals and list updates, each with the list version it used.
 - Six MCP tools through the Atlassian MCP server: `screen-counterparty`, `request-approval`, `counterparty-status`, `match-evidence`, `add-review-note` and `list-changes`. See [skills/sanctions-hold/SKILL.md](skills/sanctions-hold/SKILL.md).
 - A Sanctions Hold agent in Rovo with the same six actions, and the same instructions as a Rovo skill that other agents can add. Ask it about a supplier and it screens the company and owners, and opens the onboarding request in Jira when you want to go ahead. Start it from a work item's Agent sessions and it compares each match waiting for review with the owner's details, lists what the reviewer could ask for, and posts its notes as a comment once you confirm.
@@ -25,10 +26,11 @@ Built for Atlassian Codegeist 2026 (Apps for Business Teams; bonus: Best app wit
 3. Open VEND-1 (Dexterus Global DMCC) and try the Approve transition. Jira blocks it and names the possible match. Open "Sanctions Hold" in the right sidebar to see the evidence and decide.
 4. VEND-2: confirm the 60% owner and the vendor is blocked under OFAC's 50 Percent Rule and moves to Blocked. VEND-6: confirm both matches for the 20% owner and choose whether to proceed. VEND-7: the 60% owner is on the UK list only; confirm the match and the UK test blocks the vendor. VEND-9: the 30% and 25% owners are on the EU list only; confirm both and the EU rule, which adds up their 55%, blocks the vendor.
 5. VEND-3 is close to an alias of an Iranian company; mark it "Not the same party" and it can be approved. VEND-4 has no match. On VEND-8 (Savannah Freight Ltd), select Start work → Sanctions Hold under Agent sessions: the agent compares the owner, born 1990 and Kenyan, with the two matched SDN entries and asks whether to post its review notes; select Confirm to add them as a comment.
-6. The sample starts from the latest OFAC publication without its newest SDN designations. On the Overview, select "Replay them as a list update". VEND-5, approved two months earlier, is matched by one of those designations and moves to Sanctions review with a comment. The approved vendor Berkeley Trading LLC, which has no work item, goes back to review as well.
-7. The Accuracy tab shows the held-out result. "Run the test on this site" runs about 13,000 searches in the background (about 25 minutes) and adds the site's result beside it when the run finishes.
+6. The sample starts from the latest OFAC publication without its newest SDN designations. On the Overview, select "Replay them as a list update". VEND-5, approved two months earlier, is matched by one of those designations and moves to Sanctions review with a comment. The approved vendor Berkeley Trading LLC had no work item, so the app opens one for its review.
+7. The Accuracy tab shows the held-out result. "Run the test on this site" runs about 13,000 searches in the background (about four minutes on the demo site) and adds the site's result beside it.
+8. In Settings, set "Year of birth" to On. Every vendor is screened again. If the matches on VEND-8 are still open, the rule clears EBRAHIMI, Yousef (born 1977) with a comment on VEND-8 and leaves IBRAHIM, Aadan Yusuf Saciid open, because one of the entry's years of birth, 1989, is within a year of the owner's 1990.
 
-To use the MCP tools on a site with Rovo, a site admin opens the site's Site settings in admin.atlassian.com → Connected apps → sanctions-hold → Details, and under "Expose tools to MCP-compatible apps" selects "Enable tools".
+To use the MCP tools on a site with Rovo, a site admin opens the site's Site settings in admin.atlassian.com → Connected apps → sanctions-hold → Details, and under "Expose tools to MCP-compatible apps" selects "Enable tools". [examples/mcp-agent](examples/mcp-agent) is a command-line agent that takes one request in plain language, follows SKILL.md and calls the tools through the Atlassian MCP server.
 
 ## Accuracy
 
@@ -41,7 +43,7 @@ To use the MCP tools on a site with Rovo, a site admin opens the site's Site set
 | 0.92 (default) | 99.5% (6,047 of 6,077) | 0.3% (11 of 3,391) | 1.8% (60 of 3,392) |
 | 0.94 | 99.4% (6,041 of 6,077) | 0.2% (8 of 3,391) | 1.6% (54 of 3,392) |
 
-Recall by kind at 0.92: listed name, alias, word order, legal suffix and one given name and surname 100%, one-letter typo 98.7%, transliteration 97.1%. Of the 60 people flagged, 50 differ from every list entry they matched in year of birth or nationality, which the review panel marks "differs".
+Recall by kind at 0.92: listed name, alias, word order, legal suffix and one given name and surname 100%, one-letter typo 98.7%, transliteration 97.1%. Of the 60 people flagged, 50 differ from every list entry they matched in year of birth or nationality, which the review panel marks "differs". The person names carry their year of birth from Wikidata; with the year-of-birth rule on, 15 of the 3,392 stay flagged (0.4%), including 8 of 198 from the UAE.
 
 ```sh
 scripts/fetch-ofac.sh /tmp/ofac
@@ -79,6 +81,7 @@ forge install --product jira --site <your-site>.atlassian.net
 | `src/jobs.js` | Hourly list check and queue consumer |
 | `src/actions.js` | MCP tools and Rovo actions |
 | `skills/sanctions-hold/SKILL.md` | The Rovo skill, also the guide for MCP clients |
+| `examples/mcp-agent/` | A command-line agent that uses the MCP tools with SKILL.md as its instructions |
 | `static/agent/prompt.txt` | The Rovo agent's instructions |
 | `src/data/` | The company and person names used to measure false positives, and the offline result |
 

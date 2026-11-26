@@ -22,6 +22,14 @@ export function listFacts(entry) {
   return { born: dobs.length ? [...new Set(dobs)].join('; ') : null, years, nationality: nats.length ? nats.join('; ') : null };
 }
 
+// The year-of-birth rule: a person match is cleared when the owner's year of birth is more than
+// `tolerance` years away from every year of birth on the list entry. An entry without one is never cleared.
+export function birthYearClears(born, years, tolerance = 1) {
+  const y = Number(String(born || '').slice(0, 4));
+  if (!y || !years?.length) return false;
+  return years.every((x) => Math.abs(Number(x) - y) > tolerance);
+}
+
 // "same" or "differs" for the year of birth and the nationality, or null when either side is missing.
 export function compareOwner(owner, entry) {
   const f = listFacts(entry);

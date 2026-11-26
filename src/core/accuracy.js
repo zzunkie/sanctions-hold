@@ -2,6 +2,7 @@
 // Positives: list entries queried by their own name, an alias, and spelling variants of the name.
 // Negatives: real legal entity names from GLEIF (public LEI records) that are not on the lists.
 import { screen, normalize, tokenize } from './match.js';
+import { birthYearClears } from './evidence.js';
 
 export function makeRng(seed = 42) {
   let s = seed;
@@ -87,13 +88,13 @@ export function positiveQueries(entries, aliasesById, { sample = 1500, seed = 42
   return { sample: chosen.length, list };
 }
 
-// Runs list[from] onwards until the clock passes `until`, and says where it stopped.
-export function evalQueries(index, list, { threshold = 0.92, clock = () => Date.now(), from = 0, until = Infinity } = {}) {
+// Runs list[from] up to list[to] until the clock passes `until`, and says where it stopped.
+export function evalQueries(index, list, { threshold = 0.92, clock = () => Date.now(), from = 0, to = Infinity, until = Infinity } = {}) {
   const positives = {};
   const misses = {};
   let ms = 0;
   let i = from;
-  for (; i < list.length && clock() < until; i += 1) {
+  for (const end = Math.min(list.length, to); i < end && clock() < until; i += 1) {
     const { id, name, kind, query } = list[i];
     const t0 = clock();
     const hits = screen(index, query, { threshold });
@@ -131,7 +132,7 @@ const tally = (by, country, flagged) => {
 
 // A company whose name, without the legal form, equals a list name must be reviewed by any
 // screening; it is counted apart from false positives.
-export function evalCompanies(index, negatives, { threshold = 0.92, clock = () => Date.now(), from = 0, until = Infinity } = {}) {
+export function evalCompanies(index, negatives, { threshold = 0.92, clock = () => Date.now(), from = 0, to = Infinity, until = Infinity } = {}) {
   const listNames = new Set(index.names.map((n) => n.tokens.join(' ')));
   const neg = { n: 0, falsePositives: 0, sameName: 0, byCountry: {} };
   const flagged = [];
@@ -139,7 +140,7 @@ export function evalCompanies(index, negatives, { threshold = 0.92, clock = () =
   let ms = 0;
   let queries = 0;
   let i = from;
-  for (; i < negatives.length && clock() < until; i += 1) {
+  for (const end = Math.min(negatives.length, to); i < end && clock() < until; i += 1) {
     const c = negatives[i];
     if (listNames.has(tokenize(c.name).join(' '))) { neg.sameName += 1; if (sameSamples.length < 5) sameSamples.push(c.name); continue; }
     neg.n += 1;
@@ -154,14 +155,14 @@ export function evalCompanies(index, negatives, { threshold = 0.92, clock = () =
 }
 
 // A person whose words, in any order, equal a list name ("Wei Zhang" and "ZHANG, Wei") is counted apart.
-export function evalPeople(index, people, { threshold = 0.92, clock = () => Date.now(), from = 0, until = Infinity } = {}) {
+export function evalPeople(index, people, { threshold = 0.92, clock = () => Date.now(), from = 0, to = Infinity, until = Infinity } = {}) {
   const sorted = new Set(index.names.map((n) => [...n.tokens].sort().join(' ')));
   const peopleNeg = { n: 0, falsePositives: 0, sameName: 0, byCountry: {} };
   const flagged = [];
   let ms = 0;
   let queries = 0;
   let i = from;
-  for (; i < people.length && clock() < until; i += 1) {
+  for (const end = Math.min(people.length, to); i < end && clock() < until; i += 1) {
     const p = people[i];
     if (sorted.has([...tokenize(p.name)].sort().join(' '))) { peopleNeg.sameName += 1; continue; }
     peopleNeg.n += 1;
@@ -170,9 +171,22 @@ export function evalPeople(index, people, { threshold = 0.92, clock = () => Date
     ms += clock() - t0;
     queries += 1;
     tally(peopleNeg.byCountry, p.country, hits.length > 0);
-    if (hits.length) { peopleNeg.falsePositives += 1; flagged.push({ name: p.name, country: p.country, matched: hits[0].matchedName, score: hits[0].score }); }
+    if (hits.length) { peopleNeg.falsePositives += 1; flagged.push({ name: p.name, country: p.country, born: p.born || null, matched: hits[0].matchedName, score: hits[0].score, entryIds: hits.map((h) => h.entryId) }); }
   }
   return { people: peopleNeg, flagged, peopleSamples: spread(flagged), ms, queries, next: i };
+}
+
+// Flagged people who stay in review with the year-of-birth rule on: no year of birth, or at least one
+// matched entry with a year of birth within a year of theirs or with none. yearsOf(entryId) -> years on the entry.
+export function afterBirthYearRule(flagged, yearsOf) {
+  const byCountry = {};
+  let left = 0;
+  for (const f of flagged) {
+    if (f.born && (f.entryIds || []).every((id) => birthYearClears(f.born, yearsOf(id)))) continue;
+    left += 1;
+    byCountry[f.country] = (byCountry[f.country] || 0) + 1;
+  }
+  return { left, byCountry };
 }
 
 const addCounts = (a = {}, b = {}) => {
@@ -224,9 +238,11 @@ export function combine({ threshold, seed, listNames }, pos, comp, ppl) {
   };
 }
 
-export function evaluate(index, entries, aliasesById, negatives, { threshold = 0.92, sample = 1500, seed = 42, clock = () => Date.now(), people = null } = {}) {
+export function evaluate(index, entries, aliasesById, negatives, { threshold = 0.92, sample = 1500, seed = 42, clock = () => Date.now(), people = null, yearsOf = null } = {}) {
   const pos = evalPositives(index, entries, aliasesById, { threshold, sample, seed, clock });
   const comp = evalCompanies(index, negatives, { threshold, clock });
   const ppl = people ? evalPeople(index, people, { threshold, clock }) : null;
-  return combine({ threshold, seed, listNames: index.N }, pos, comp, ppl);
+  const res = combine({ threshold, seed, listNames: index.N }, pos, comp, ppl);
+  if (ppl && yearsOf) res.peopleAfterBirthYearRule = afterBirthYearRule(ppl.flagged, yearsOf);
+  return res;
 }
