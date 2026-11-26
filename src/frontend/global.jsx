@@ -315,18 +315,22 @@ function VendorForm({ initial = {}, submitLabel, onSubmit }) {
   const [name, setName] = useState(initial.name || '');
   const [country, setCountry] = useState(initial.country || '');
   const [owners, setOwners] = useState((initial.owners || []).join('; '));
+  const [address, setAddress] = useState(initial.address || '');
+  const [registrationNumber, setRegistrationNumber] = useState(initial.registrationNumber || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const submit = async () => {
     setBusy(true);
     setError(null);
-    try { await onSubmit({ name, country, owners: owners.split(';').map((s) => s.trim()).filter(Boolean) }); } catch (e) { setError(e.message); } finally { setBusy(false); }
+    try { await onSubmit({ name, country, address, registrationNumber, owners: owners.split(';').map((s) => s.trim()).filter(Boolean) }); } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
   return (
     <Stack space="space.100">
       <Inline space="space.150" alignBlock="end" shouldWrap>
         <Stack space="space.050"><Label labelFor="vname">Legal name</Label><Box xcss={narrow}><Textfield id="vname" defaultValue={name} onChange={(e) => setName(e.target.value)} /></Box></Stack>
         <Stack space="space.050"><Label labelFor="vcountry">Country (2 letters)</Label><Box xcss={xcss({ width: '120px' })}><Textfield id="vcountry" defaultValue={country} onChange={(e) => setCountry(e.target.value)} /></Box></Stack>
+        <Stack space="space.050"><Label labelFor="vaddress">Registered address</Label><Box xcss={narrow}><Textfield id="vaddress" defaultValue={address} onChange={(e) => setAddress(e.target.value)} /></Box></Stack>
+        <Stack space="space.050"><Label labelFor="vreg">Registration or license number</Label><Box xcss={xcss({ width: '220px' })}><Textfield id="vreg" defaultValue={registrationNumber} onChange={(e) => setRegistrationNumber(e.target.value)} /></Box></Stack>
         <Stack space="space.050"><Label labelFor="vowners">Owners with their share, and directors, separated by ;</Label><Box xcss={narrow}><Textfield id="vowners" placeholder="Ali Kalhor 60%; Sara Haddad director" defaultValue={owners} onChange={(e) => setOwners(e.target.value)} /></Box></Stack>
         <Button appearance="primary" isLoading={busy} onClick={submit}>{submitLabel}</Button>
       </Inline>
@@ -398,7 +402,7 @@ function Vendors({ onChange, stamp }) {
   const [term, setTerm] = useState('');
   const [open, setOpen] = useState(null);
   const [msg, setMsg] = useState(null);
-  const list = useLoad('listCounterparties', { status, search: term, limit: 200 }, [status, term, stamp]);
+  const list = useLoad('listCounterparties', { status, search: term, limit: 500 }, [status, term, stamp]);
   const upload = async (files) => {
     const f = files?.[0];
     if (!f) return;
@@ -411,6 +415,11 @@ function Vendors({ onChange, stamp }) {
   return (
     <Stack space="space.300">
       <Text color="color.text.subtle">Every vendor Sanctions Hold screens: from onboarding work items, the Rovo agent, MCP clients and CSV imports. All of them are screened again after each list update.</Text>
+      <Heading size="small">Import the vendors you already work with</Heading>
+      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened now and after every list update, and a possible match opens a work item in the onboarding project.</Text>
+      <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
+      {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
+      <Heading size="small">All vendors</Heading>
       <Inline space="space.150" alignBlock="end" shouldWrap>
         <Stack space="space.050"><Label labelFor="search">Search name, owner or work item</Label><Box xcss={narrow}><Textfield id="search" onChange={(e) => setSearch(e.target.value)} /></Box></Stack>
         <Button onClick={() => setTerm(search)}>Search</Button>
@@ -439,10 +448,6 @@ function Vendors({ onChange, stamp }) {
       )}
       <Heading size="small">Add a vendor</Heading>
       <VendorForm submitLabel="Add and screen" onSubmit={async (v) => { const r = await call('addCounterparty', v); setOpen(r.view.counterparty.id); list.reload(); onChange(); }} />
-      <Heading size="small">Import the vendors you already work with</Heading>
-      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened now and after every list update, and a possible match opens a work item in the onboarding project.</Text>
-      <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
-      {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
       <ModalTransition>{open ? <VendorModal id={open} onClose={(changed) => { setOpen(null); if (changed) { list.reload(); onChange(); } }} /> : null}</ModalTransition>
     </Stack>
   );
@@ -558,7 +563,8 @@ function Accuracy({ onStarted, finishedAt }) {
       <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
       <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
-      <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries (vessels and aircraft left out) find their entry when searched with the country given for each.</Text>
+      <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries find their entry when searched with the country given for each. None of 10,809 GLEIF companies searched by registration number (1,846 in Russia, 8,963 in 16 other countries and territories) matched another company's entry.</Text>
+      <Text color="color.text.subtle">Year-of-birth rule (measured offline 2026-11-26): across pairs of entries sharing a primary name on two lists, given a single year of birth from one list, the rule kept the match on the other list in 6,828 of 6,925 directed checks (98.6%).</Text>
       <Inline space="space.100"><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button>
         <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide sampling details and flagged names' : 'Sampling details and flagged names'}</Button></Inline>
       {method ? (
@@ -607,7 +613,7 @@ function Settings({ onChange, onRemoved, stamp }) {
   const off = !data.admin;
   return (
     <Stack space="space.300">
-      <Text color="color.text.subtle">{off ? 'Only Jira admins can change these settings. You can see them here.' : 'Only Jira admins can change these settings.'}</Text>
+      {off ? <Text color="color.text.subtle">Only Jira admins can change these settings.</Text> : null}
       <Stack space="space.100">
         <Heading size="small">Match threshold</Heading>
         <Text color="color.text.subtle">Names scoring at or above the threshold go to the review queue. The rates come from the accuracy test.</Text>
@@ -638,7 +644,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Audit record</Heading>
-        <Text color="color.text.subtle">Every screening, possible match, reviewer decision with its reason, blocked approval, approval, list update and change of the reviewer group, with the list publication it used.</Text>
+        <Text color="color.text.subtle">Each screening, decision and blocked approval is kept with the list version it used, one row per event in the CSV.</Text>
         <Inline><Button isLoading={busy === 'audit'} onClick={async () => { setBusy('audit'); try { setAudit((await call('auditCsv', { days: 90 })).csv); } finally { setBusy(null); } }}>Build the CSV for the last 90 days</Button></Inline>
         {audit ? <CodeBlock language="text" shouldWrapLongLines text={audit} /> : null}
       </Stack>

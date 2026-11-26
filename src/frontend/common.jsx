@@ -79,7 +79,7 @@ export function placesOfHit(hit, cp) {
   const line = (label, mine, listed, cmp) => (
     <Inline key={label} space="space.050" alignBlock="center" shouldWrap>
       <Text>{`${label} ${mine || 'not given'}, list ${listed || 'none'}`}</Text>
-      {cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'success'}>{cmp}</Lozenge> : null}
+      {cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'default'}>{cmp}</Lozenge> : null}
     </Inline>
   );
   if (!owner) {
@@ -116,7 +116,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
   const facts = compareOwner(owner, e);
   const reg = owner ? { ids: [], registrationCompared: null } : compareRegistration(cp.registrationNumber, e);
   // Red when the owner's detail agrees with the list entry, green when it differs.
-  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'success'}>{cmp}</Lozenge> : null);
+  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'default'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
   if (compact) {
     const line = (label, mine, theirs, cmp) => <Inline key={label} space="space.050" alignBlock="center" shouldWrap><Text>{`${label}: ${mine} / ${theirs}`}</Text>{tag(cmp)}</Inline>;
@@ -137,7 +137,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
     row('n', owner ? (owner.role === 'director' ? 'Director' : 'Owner') : 'Name', owner ? `${owner.name}${owner.role === 'director' ? ' (director)' : owner.share != null ? ` (${owner.share}%)` : ''}` : cp.name, matchedText(hit)),
     // For an owner or director the company's country says nothing about the person; nationality does.
     ...(owner ? [] : [row('c', 'Country', countryName(cp.country) || 'not given',
-      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'success'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
+      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'default'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
     // The kind only says something when it does not fit: a person matched to a company entry, or the reverse.
     ...((owner ? e.kind !== 'individual' : e.kind === 'individual') ? [row('t', 'Type', owner ? 'person' : 'company', e.kind)] : []),
     ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),
@@ -246,7 +246,7 @@ export function OwnershipNote({ view, onDone, compact = false }) {
   return (
     <SectionMessage appearance={decided ? (a.reason === 'reviewer-blocked' ? 'error' : 'success') : 'warning'} title={decided ? (a.reason === 'reviewer-blocked' ? 'Blocked by a reviewer' : 'Reviewer let the vendor proceed') : 'Listed minority owner or director'}>
       <Stack space="space.100">
-        <Text>{`${listedPeople(a)} ${one(a) ? 'is' : 'are'} confirmed as listed and ${stop(a.share ? `${one(a) ? 'holds' : 'hold'} ${a.share}% of ${cp.name}${one(a) ? '' : ' together'}` : `${one(a) ? 'is a director' : 'are directors'}`)} ${ruleNote(a)} Sanctions on the listed person still apply.`}</Text>
+        <Text>{`${listedPeople(a)} ${one(a) ? 'is' : 'are'} confirmed as listed and ${stop(a.share ? `${one(a) ? 'holds' : 'hold'} ${a.share}% of ${cp.name}${one(a) ? '' : ' together'}` : `${one(a) ? 'is a director' : 'are directors'}`)} ${ruleNote(a)}`}</Text>
         {decided ? <Text color="color.text.subtle">{`Decision on ${fmtDate(cp.decision_at)}: ${cp.decision_reason || ''}`}</Text> : null}
         {compact ? null : access && !access.allowed ? <ReviewersNote group={access.group} /> : decided && !changing ? (
           <Inline><Button appearance="subtle" onClick={() => setChanging(true)}>Change the decision</Button></Inline>

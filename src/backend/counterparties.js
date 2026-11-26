@@ -106,7 +106,7 @@ export const NEXT = {
   'eu-ownership': 'Confirmed owners listed by the EU hold 50% or more of the company, so it is subject to the EU asset freeze. Approval stays blocked.',
   'share-unknown': 'The listed owner\'s share is not given, so approval stays blocked until the share is entered.',
   'listed-person': 'Approval stays blocked.',
-  minority: 'No ownership rule blocks the vendor automatically. Open Sanctions Hold from the work item\'s Apps button to decide whether to proceed or block.',
+  minority: 'No ownership rule blocks the vendor automatically. Open Sanctions Hold from View app actions, under the work item\'s title, to decide whether to proceed or block.',
   pending: 'Other possible matches still wait for review.',
   review: 'Other possible matches still wait for review.',
   blocked: 'Approval stays blocked.',
@@ -129,8 +129,8 @@ export async function decideCounterparty({ counterpartyId, decision, reason }, a
   await q('UPDATE counterparty SET status = ? WHERE id = ?', status, counterpartyId);
   const people = peopleText(before.people);
   await logEvents([
-    { counterpartyId, issueKey: cp.issue_key, type: `vendor_${decision === 'proceed' ? 'proceeded' : 'blocked'}`, detail: { people, share: before.share, reason: why }, actor: accountId },
-    ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status }, actor: accountId }] : []),
+    { counterpartyId, issueKey: cp.issue_key, type: `vendor_${decision === 'proceed' ? 'proceeded' : 'blocked'}`, detail: { people, share: before.share, reason: why, listVersion: cp.screened_version }, actor: accountId },
+    ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: cp.screened_version }, actor: accountId }] : []),
   ]);
   if (cp.issue_key) {
     await comment(cp.issue_key, [`Sanctions Hold: listed ${people} ${decision === 'proceed' ? 'noted; the vendor may proceed' : 'blocks this vendor'}, decided by `, { mention: accountId }, '.'], `Reason: ${why}`,
@@ -155,8 +155,8 @@ export async function reviewMatch({ counterpartyId, entryId, decision, reason },
   const { status, reason: why2 } = assess(all, cp, await policy());
   await q('UPDATE counterparty SET status = ? WHERE id = ?', status, counterpartyId);
   await logEvents([
-    { counterpartyId, entryId, issueKey: cp.issue_key, type: `match_${decision}`, detail: { matchedName: h.matched_name, score: Number(h.score), reason: why, from: h.status }, actor: accountId },
-    ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status }, actor: accountId }] : []),
+    { counterpartyId, entryId, issueKey: cp.issue_key, type: `match_${decision}`, detail: { matchedName: h.matched_name, score: Number(h.score), reason: why, from: h.status, listVersion: cp.screened_version }, actor: accountId },
+    ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: cp.screened_version }, actor: accountId }] : []),
   ]);
   if (cp.issue_key && decision !== 'pending') {
     const verb = decision === 'dismissed' ? 'not the same party' : 'confirmed as the same party';
@@ -248,8 +248,9 @@ export async function auditCsv({ days = 90 } = {}) {
   const rows = await q(`SELECT l.at, l.type, l.issue_key, c.name AS counterparty, l.entry_id, l.actor, l.detail
                         FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
                         WHERE l.at >= ? ORDER BY l.at DESC LIMIT 5000`, since);
-  const head = ['time_utc', 'event', 'work_item', 'counterparty', 'list_entry', 'actor', 'detail'];
-  return [head.join(','), ...rows.map((r) => [iso(r.at), r.type, r.issue_key, r.counterparty, r.entry_id, r.actor, r.detail].map(csvCell).join(','))].join('\n');
+  const version = (d) => { try { return JSON.parse(d || '{}').listVersion || ''; } catch { return ''; } };
+  const head = ['time_utc', 'event', 'work_item', 'counterparty', 'list_entry', 'list_version', 'actor', 'detail'];
+  return [head.join(','), ...rows.map((r) => [iso(r.at), r.type, r.issue_key, r.counterparty, r.entry_id, version(r.detail), r.actor, r.detail].map(csvCell).join(','))].join('\n');
 }
 
 export { marks };

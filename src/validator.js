@@ -25,7 +25,7 @@ export async function validate(args) {
   const top = hits[0];
   const people = peopleText(a.people, { withShare: false });
   const withShares = peopleText(a.people);
-  await logEvent({ counterpartyId: cp.id, issueKey: key, type: 'approval_blocked', detail: { status: cp.status, reason: a.reason, matches: hits.length }, actor: 'workflow' });
+  await logEvent({ counterpartyId: cp.id, issueKey: key, type: 'approval_blocked', detail: { status: cp.status, reason: a.reason, matches: hits.length, listVersion: cp.screened_version }, actor: 'workflow' });
   const no = (text) => ({ result: false, errorMessage: `Sanctions Hold: ${text}` });
   if (a.reason === 'company') return no(`${cp.name} has a confirmed sanctions list match (${hits.find((h) => h.status === 'confirmed')?.matched_name || 'a listed party'}) and cannot be approved.`);
   if (a.reason === 'fifty-percent') return no(`${cp.name} cannot be approved. ${people}, confirmed as OFAC-listed, ${(a.people || []).length === 1 ? 'holds' : 'hold'} ${a.share}% of the company, which blocks it under OFAC's 50 Percent Rule.`);
@@ -33,7 +33,7 @@ export async function validate(args) {
   if (a.reason === 'eu-ownership') return no(`${cp.name} cannot be approved. ${people}, confirmed on the EU consolidated list, ${(a.people || []).length === 1 ? 'holds' : 'hold a combined'} ${a.share}% of the company, which blocks it under the EU ownership rule.`);
   if (a.reason === 'share-unknown') return no(`${cp.name} cannot be approved. ${people} ${(a.people || []).length === 1 ? 'is' : 'are'} confirmed as listed without an ownership share; enter the share in Vendor details.`);
   if (a.reason === 'listed-person' || a.reason === 'reviewer-blocked') return no(`${cp.name} cannot be approved because of a confirmed listed owner or director: ${withShares}.`);
-  if (a.reason === 'minority') return no(`${cp.name} has a confirmed listed owner or director below the ownership thresholds: ${withShares}. Approve after a reviewer chooses Proceed in Sanctions Hold (Apps button).`);
+  if (a.reason === 'minority') return no(`${cp.name} has a confirmed listed owner or director: ${withShares}. Approve after a reviewer chooses Proceed in Sanctions Hold (View app actions).`);
   const n = hits.filter((h) => h.status === 'pending').length;
-  return no(`${cp.name} has ${n} possible sanctions ${plural(n, 'match', 'matches')} waiting for review (closest: ${top?.matched_name}, score ${Number(top?.score).toFixed(2)}). Approve after a reviewer decides in Sanctions Hold (Apps button).`);
+  return no(`${cp.name} has ${n} possible sanctions ${plural(n, 'match', 'matches')} waiting for review (closest: ${top?.matched_name}, score ${Number(top?.score).toFixed(2)}). Approve after a reviewer decides in Sanctions Hold (View app actions).`);
 }

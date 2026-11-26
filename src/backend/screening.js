@@ -61,7 +61,9 @@ async function rowsIn(sqlText, ids) {
 const HIT_COLS = ['counterparty_id', 'entry_id', 'queried_name', 'matched_name', 'score', 'status', 'active', 'entry_hash', 'found_at', 'found_version', 'matched_on'];
 
 // ids: counterparty ids, or null for all. Returns counts and the approved vendors newly matched.
-export async function screenCounterparties(ids = null, { actor = 'app', reason = 'screen' } = {}) {
+// With `part`, the ids are one part of screening every vendor again: no per-vendor event, and the last part
+// records the whole run with the counts of the parts before it.
+export async function screenCounterparties(ids = null, { actor = 'app', reason = 'screen', part = null } = {}) {
   const cache = await loadIndex();
   if (!cache) return { skipped: 'The sanctions lists are not loaded yet.' };
   const policy = await getPolicy();
@@ -154,7 +156,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     // The rule was turned off, or the year of birth or the entry changed: say on the work item that the match is open again.
     if (cp.issue_key && backHere.length) ruleNotes.push([cp.issue_key, `Sanctions Hold: the year-of-birth rule no longer clears ${one(backHere.length, 'this possible match', 'these possible matches')}, so ${one(backHere.length, 'it is', 'they are')} back for review.`, backHere.map(noteLine)]);
     if (status !== cp.status) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: version } });
-    if (ids) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
+    if (ids && !part) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
     const stillOpen = r.opened.filter((o) => !ruledHere.has(o.entryId));
     if (cp.approved_at && stillOpen.length) approvedMatched.push({ cp, opened: stillOpen });
     else if (cp.issue_key && status !== cp.status && (status === 'blocked' || cp.status === 'blocked' || (!cp.approved_at && status === 'review'))) newlyHeld.push([cp.issue_key, cp.status, status]);
@@ -178,12 +180,13 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     await q(`UPDATE counterparty SET status = CASE id ${part.map(() => 'WHEN ? THEN ?').join(' ')} END, screened_at = ?, screened_version = ?
              WHERE id IN (${marks(part.length)})`, ...part.flat(), now, version, ...part.map((p) => p[0]));
   }
-  if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
+  const newMatches = events.filter((e) => e.type === 'match_found').length;
+  if (!ids || part?.last) events.push({ type: 'rescreen_all', actor, detail: { counterparties: (part?.before?.screened || 0) + cps.length, listVersion: version, threshold, reason, newMatches: (part?.before?.newMatches || 0) + newMatches } });
   await logEvents(events);
   for (const [k, head, lines] of ruleNotes) await comment(k, head, ...lines).catch((e) => console.error('rule note', k, e.message));
   for (const m of approvedMatched) await notifyApprovedMatch(m, cache, reason).catch((e) => console.error('notify', m.cp.issue_key, e.message));
   for (const [k, from, to] of newlyHeld) await syncWorkItem(k, from, to).catch((e) => console.error('hold', k, e.message));
-  return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
+  return { screened: cps.length, newMatches, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
 }
 
 // An approved vendor without a work item (approved before Sanctions Hold, or imported) gets one in the
@@ -225,7 +228,7 @@ async function notifyApprovedMatch({ cp, opened }, cache, reason) {
       ? `Sanctions Hold: screening this imported vendor against the lists updated OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''} found a possible match.`
       : `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
     ...lines,
-    `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Open Sanctions Hold from the work item's Apps button to review the match.`,
+    `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Open Sanctions Hold from View app actions, under the work item's title, to review the match.`,
   );
   await addLabel(cp.issue_key, 'sanctions-review');
   await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));

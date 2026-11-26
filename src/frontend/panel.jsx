@@ -82,9 +82,9 @@ function Panel() {
           {/* The sidebar is a summary; reviewers decide in the wider panel, next to the full list entries. */}
           {compact && (open.some((h) => h.status === 'pending') || view?.assessment?.reason === 'minority')
             ? <Text color="color.text.subtle">{access && !access.allowed
-              ? `Decisions here are made by members of the Jira group ${access.group}. Open Sanctions Hold from the work item's Apps button to see each full list entry beside the vendor.`
-              : "To decide, open Sanctions Hold from the work item's Apps button. It shows each full list entry beside the vendor."}</Text>
-            : compact && open.length ? <Text color="color.text.subtle">Open Sanctions Hold from the work item's Apps button to see each full list entry beside the vendor.</Text> : null}
+              ? `Decisions here are made by members of the Jira group ${access.group}. Open Sanctions Hold from View app actions, under the work item's title, to see each full list entry beside the vendor.`
+              : "To decide, open Sanctions Hold from View app actions, under the work item's title. It shows each full list entry beside the vendor."}</Text>
+            : compact && open.length ? <Text color="color.text.subtle">Open Sanctions Hold from View app actions, under the work item's title, to see each full list entry beside the vendor.</Text> : null}
           {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (

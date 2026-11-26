@@ -47,6 +47,7 @@ function VendorDetailsEdit() {
   const setOwner = (i, patch) => update({ ...value, owners: value.owners.map((o, j) => (j === i ? { ...o, ...patch } : o)) });
   const body = (
     <Stack space="space.100">
+      {createMode ? <Text color="color.text.subtle">Enter the vendor's legal name in Summary above.</Text> : null}
       <Stack space="space.050">
         <Label labelFor="vd-country">Country of registration</Label>
         <Select inputId="vd-country" options={COUNTRY_OPTIONS} isClearable
