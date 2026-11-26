@@ -103,7 +103,7 @@ export function placesOfHit(hit, cp) {
 }
 
 // The evidence a reviewer needs, side by side: what the vendor gave and what the list entry says.
-// In the narrow sidebar (compact) only the entry and the year of birth, nationality or country are shown.
+// In the narrow sidebar (compact) a match is two lines: the entry, then its list and what agrees or differs.
 export function MatchEvidence({ hit, cp, compact = false }) {
   const [showRemarks, setShowRemarks] = useState(false);
   const e = hit.entry;
@@ -119,16 +119,13 @@ export function MatchEvidence({ hit, cp, compact = false }) {
   const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'default'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
   if (compact) {
-    const line = (label, mine, theirs, cmp) => <Inline key={label} space="space.050" alignBlock="center" shouldWrap><Text>{`${label}: ${mine} / ${theirs}`}</Text>{tag(cmp)}</Inline>;
+    const cmp = owner
+      ? [facts.bornCompared ? `year of birth ${facts.bornCompared}` : null, facts.nationalityCompared ? `nationality ${facts.nationalityCompared}` : null]
+      : [sameCountry === null ? null : `country ${sameCountry ? 'same' : 'differs'}`, reg.registrationCompared ? `registration ${reg.registrationCompared}` : null];
     return (
-      <Stack space="space.075">
+      <Stack space="space.050">
         <Text weight="medium">{matchedText(hit)}</Text>
-        <Text color="color.text.subtle">{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed'}. ${hit.matchedOn ? `Found by the registration number (${hit.matchedOn})` : `Score ${score(hit.score)}`}.`}</Text>
-        {owner
-          ? [line('Born', owner.born || 'not given', facts.born || 'none given', facts.bornCompared), line('Nationality', countryName(owner.nationality) || 'not given', facts.nationality || 'none given', facts.nationalityCompared)]
-          : [line('Country', countryName(cp.country) || 'not given', e.countries || 'none given', sameCountry === null ? null : sameCountry ? 'same' : 'differs'),
-            ...(reg.registrationCompared ? [line('Registration', cp.registrationNumber, reg.registrationCompared === 'same' ? cp.registrationNumber : reg.ids.map((x) => x.value).slice(0, 3).join(', '), reg.registrationCompared)] : [])]}
-        <Text color="color.text.subtle">{`${e.list === 'UK' || e.list === 'EU' ? 'Regime' : 'Program'}: ${e.programs || 'none given'}`}</Text>
+        <Text color="color.text.subtle">{[`${listName(e.list)}${e.onList ? '' : ' (since removed)'}`, hit.matchedOn ? 'found by the registration number' : `score ${score(hit.score)}`, ...cmp.filter(Boolean)].join(' · ')}</Text>
       </Stack>
     );
   }
@@ -229,6 +226,11 @@ export function OwnershipNote({ view, onDone, compact = false }) {
     setError(null);
     try { onDone(await call('decideVendor', { counterpartyId: cp.id, decision, reason })); setChanging(false); } catch (e) { setError(e.message); } finally { setBusy(null); }
   };
+  // The sidebar gives the rule and the share; the panel in the main column gives the full reasoning.
+  const RULE_TITLE = { 'fifty-percent': "Blocked under OFAC's 50 Percent Rule", 'uk-majority': 'Blocked under the UK ownership test', 'eu-ownership': 'Blocked under the EU ownership rule' };
+  if (compact && RULE_TITLE[a.reason]) {
+    return <SectionMessage appearance="error" title={RULE_TITLE[a.reason]}><Text>{`${listedPeople(a)} ${one(a) ? 'holds' : 'hold a combined'} ${a.share}% of ${stop(cp.name)}`}</Text></SectionMessage>;
+  }
   if (a.reason === 'fifty-percent') {
     return <SectionMessage appearance="error" title="Blocked under OFAC's 50 Percent Rule"><Text>{`${listedPeople(a)}, confirmed as ${one(a) ? 'an OFAC-listed person, holds' : 'OFAC-listed persons, hold'} ${a.share}% of ${stop(`${cp.name}${one(a) ? '' : ' together'}`)} OFAC treats a company owned 50% or more by blocked persons as blocked itself.`}</Text></SectionMessage>;
   }
@@ -246,7 +248,7 @@ export function OwnershipNote({ view, onDone, compact = false }) {
   return (
     <SectionMessage appearance={decided ? (a.reason === 'reviewer-blocked' ? 'error' : 'success') : 'warning'} title={decided ? (a.reason === 'reviewer-blocked' ? 'Blocked by a reviewer' : 'Reviewer let the vendor proceed') : 'Listed minority owner or director'}>
       <Stack space="space.100">
-        <Text>{`${listedPeople(a)} ${one(a) ? 'is' : 'are'} confirmed as listed and ${stop(a.share ? `${one(a) ? 'holds' : 'hold'} ${a.share}% of ${cp.name}${one(a) ? '' : ' together'}` : `${one(a) ? 'is a director' : 'are directors'}`)} ${ruleNote(a)}`}</Text>
+        <Text>{`${listedPeople(a)} ${one(a) ? 'is' : 'are'} confirmed as listed and ${stop(a.share ? `${one(a) ? 'holds' : 'hold'} ${a.share}% of ${cp.name}${one(a) ? '' : ' together'}` : `${one(a) ? 'is a director' : 'are directors'}`)}${compact ? '' : ` ${ruleNote(a)}`}`}</Text>
         {decided ? <Text color="color.text.subtle">{`Decision on ${fmtDate(cp.decision_at)}: ${cp.decision_reason || ''}`}</Text> : null}
         {compact ? null : access && !access.allowed ? <ReviewersNote group={access.group} /> : decided && !changing ? (
           <Inline><Button appearance="subtle" onClick={() => setChanging(true)}>Change the decision</Button></Inline>
@@ -266,9 +268,22 @@ export function OwnershipNote({ view, onDone, compact = false }) {
   );
 }
 
-export function ReviewedNote({ hit }) {
+// A reviewer's decision on a match, which a reviewer can reopen; onReopen is given in the wider panel only.
+export function ReviewedNote({ hit, onReopen }) {
+  const access = useReviewAccess();
+  const [busy, setBusy] = useState(false);
   if (!hit.reviewedAt) return null;
   if (hit.reviewedBy === 'rule:birth-year' && hit.status === 'dismissed') return <Text color="color.text.subtle">{`Cleared by the year-of-birth rule on ${fmtDate(hit.reviewedAt)}: ${hit.reason}`}</Text>;
   const was = hit.status === 'pending' ? 'Reviewed before; the list entry changed since. Earlier decision' : 'Decision';
-  return <Text color="color.text.subtle">{`${was} on ${fmtDate(hit.reviewedAt)}: ${hit.reason || 'no reason given'}`}</Text>;
+  const reopen = async () => {
+    setBusy(true);
+    try { onReopen(await call('review', { counterpartyId: hit.counterpartyId, entryId: hit.entryId, decision: 'pending', reason: '' })); } finally { setBusy(false); }
+  };
+  return (
+    <Stack space="space.050">
+      <Text color="color.text.subtle">{`${was} on ${fmtDate(hit.reviewedAt)}: ${hit.reason || 'no reason given'}`}</Text>
+      {onReopen && hit.status !== 'pending' && !(access && !access.allowed)
+        ? <Inline><Button appearance="subtle" spacing="compact" isLoading={busy} onClick={reopen}>Reopen for review</Button></Inline> : null}
+    </Stack>
+  );
 }

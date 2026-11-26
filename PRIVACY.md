@@ -1,6 +1,6 @@
 # Sanctions Hold privacy policy
 
-Last updated: 2026-11-26
+Last updated: 2026-11-27
 
 Sanctions Hold is a Forge app for Jira Cloud. It runs on Atlassian's platform inside the Jira site where it is installed.
 
@@ -18,7 +18,7 @@ This data is kept in Forge SQL for that site's installation.
 
 The app downloads the public list files from the OFAC Sanctions List Service (`sanctionslistservice.ofac.treas.gov`, which redirects to its file storage at `wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com`) from the UK Sanctions List (`sanctionslist.fcdo.gov.uk`) and from the European Commission's Financial Sanctions Files (`webgate.ec.europa.eu`). Screening runs inside the app. Vendor names, owner names and user data are not sent to any outside service.
 
-The MCP tools return results to the MCP client that a user of the site has authorized through Atlassian.
+The MCP tools return results to the MCP client that a user of the site has authorized through Atlassian. The `match-evidence` tool also reads the description, comments and attachment names on the vendor's work item with the permissions of the user who called it, and returns them to that user's Rovo agent or MCP client; the app does not store them.
 
 ## Removing data
 

@@ -292,7 +292,7 @@ modules:
       function: act-evidence
       actionVerb: GET
       description: >-
-        Each match of a vendor with the full list entry (aliases, dates of birth, nationality, addresses, registration numbers, remarks) beside the owner or company it matched, and whether birth year, nationality, country or registration agree.
+        Each match of a vendor with the full list entry (aliases, dates of birth, nationality, addresses, registration numbers, remarks) beside the owner or company it matched, plus the work item's description, comments and attachment names.
       inputs:
         counterparty:
           title: Vendor name or work item

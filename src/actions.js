@@ -1,6 +1,6 @@
 // Rovo / MCP tools. Inputs come from a language model, so they are used as names to screen, as
 // lookup keys, or as the fields of a new onboarding request; decisions stay with Jira reviewers.
-import { route } from '@forge/api';
+import api, { route } from '@forge/api';
 import { ensureSchema, q, iso, dt, logEvent, getSetting } from './backend/db.js';
 import { loadIndex } from './backend/screen-index.js';
 import { screenNames, getPolicy, screenCounterparties, registrationHits } from './backend/screening.js';
@@ -230,6 +230,37 @@ export async function requestApproval(payload, context) {
 // confirmed or dismissed match with the full list entry next to the owner or company it was found for.
 const clipText = (v, n) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : `${t.slice(0, t.lastIndexOf(' ', n))}…`; };
 
+// Plain text from Jira's document format, one line per paragraph or list item.
+const adfText = (node) => {
+  if (!node) return '';
+  if (node.type === 'text') return node.text || '';
+  if (node.type === 'hardBreak') return '\n';
+  if (node.type === 'mention') return node.attrs?.text || '';
+  const inner = (node.content || []).map(adfText).join('');
+  return ['paragraph', 'listItem', 'heading'].includes(node.type) ? `${inner}\n` : inner;
+};
+
+// What the requester and other people wrote on the vendor's work item, and the files attached to it,
+// read as the user who asked so that the agent sees only what that user may see.
+async function fromWorkItem(issueKey) {
+  if (!issueKey) return null;
+  try {
+    const res = await api.asUser().requestJira(route`/rest/api/3/issue/${issueKey}?fields=description,attachment,reporter,comment`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const f = (await res.json()).fields || {};
+    const comments = (f.comment?.comments || []).filter((c) => c.author?.accountType !== 'app')
+      .slice(-10).map((c) => ({ by: c.author?.displayName || null, at: String(c.created || '').slice(0, 10), text: clipText(adfText(c.body), 1500) }));
+    return {
+      requester: f.reporter?.displayName || null,
+      description: clipText(adfText(f.description), 2000) || null,
+      comments,
+      attachments: (f.attachment || []).map((a) => a.filename).slice(0, 20),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function matchEvidence(payload, context) {
   await ensureSchema();
   const key = text(payload?.counterparty, 200);
@@ -250,7 +281,7 @@ export async function matchEvidence(payload, context) {
     const sameCountry = !owner && cp.country && listedCountries ? (countrySpellings(cp.country).some((x) => listedCountries.includes(x)) ? 'same' : 'differs') : null;
     return {
       listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedOn ? `registration number (${h.matchedOn})` : h.matchedName, score: h.score,
-      review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : 'dismissed as not the same party',
+      review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? `confirmed as the same ${owner ? 'person' : 'party'}` : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : `dismissed as not the same ${owner ? 'person' : 'party'}`,
       reviewReason: h.reason || null,
       foundFor: owner
         ? { owner: owner.name, role: owner.role, share: owner.share ?? null, born: owner.born || null, nationality: owner.nationality ? countryNameOf(owner.nationality) : null }
@@ -267,11 +298,13 @@ export async function matchEvidence(payload, context) {
     };
   });
   const waiting = matches.filter((m) => m.review === 'waiting for review').length;
+  const workItem = await fromWorkItem(cp.issue_key);
   return {
     found: true, workItem: cp.issue_key, name: cp.name, companyRegisteredIn: cp.country ? countryNameOf(cp.country) : null, address: cp.address || null, registrationNumber: cp.reg_no || null, status: cp.status, meaning: STATUS_TEXT[cp.status],
     owners: owners.map((o) => ({ name: o.name, role: o.role, share: o.share ?? null, born: o.born || null, nationality: o.nationality ? countryNameOf(o.nationality) : null })),
     answer: `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}, ${waiting} waiting for review. Compare each list entry with the person or company it was found for.`,
     matches,
+    ...(workItem ? { fromTheWorkItem: workItem } : {}),
   };
 }
 

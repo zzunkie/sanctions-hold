@@ -40,6 +40,17 @@ export async function showPanel(issueKey) {
   await jira(path, 'PUT', [{ added: Date.now(), id: Math.random().toString(16).slice(2, 10), collapsed: false }]);
 }
 
+// The work type for a work item the app opens in another team's project: Task when the project has it.
+export async function taskType(projectKey) {
+  const res = await jira(route`/rest/api/3/issue/createmeta/${projectKey}/issuetypes`);
+  const types = (res?.issueTypes || res?.values || []).filter((t) => !t.subtask);
+  return types.find((t) => t.name === 'Task') || types[0] || null;
+}
+
+export async function linkIssues(fromKey, toKey) {
+  await jira(route`/rest/api/3/issueLink`, 'POST', { type: { name: 'Relates' }, inwardIssue: { key: fromKey }, outwardIssue: { key: toKey } });
+}
+
 export async function setProperty(issueKey, key, value) {
   await jira(route`/rest/api/3/issue/${issueKey}/properties/${key}`, 'PUT', value);
 }

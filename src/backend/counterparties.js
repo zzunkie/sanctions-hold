@@ -5,7 +5,7 @@ import { ownerList, ownerStrings, peopleText } from '../core/owners.js';
 import { parseCsv } from '../core/csv.js';
 import { sampleVendors } from '../core/sample.js';
 import { comment, removeLabel } from './jira.js';
-import { syncWorkItem } from './screening.js';
+import { syncWorkItem, updatePaymentHolds } from './screening.js';
 
 const clean = (s, n = 400) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const country = (c) => clean(c, 8).toUpperCase() || null;
@@ -106,7 +106,7 @@ export const NEXT = {
   'eu-ownership': 'Confirmed owners listed by the EU hold 50% or more of the company, so it is subject to the EU asset freeze. Approval stays blocked.',
   'share-unknown': 'The listed owner\'s share is not given, so approval stays blocked until the share is entered.',
   'listed-person': 'Approval stays blocked.',
-  minority: 'No ownership rule blocks the vendor automatically. Decide whether to proceed or block in the Sanctions Hold panel on this work item.',
+  minority: 'No ownership rule blocks the vendor automatically. Decide whether to proceed or block in the Sanctions Hold panel.',
   pending: 'Other possible matches still wait for review.',
   review: 'Other possible matches still wait for review.',
   blocked: 'Approval stays blocked.',
@@ -138,6 +138,7 @@ export async function decideCounterparty({ counterpartyId, decision, reason }, a
     await removeLabel(cp.issue_key, 'sanctions-review').catch(() => null);
   }
   await syncWorkItem(cp.issue_key, cp.status, status).catch((e) => console.error('status', cp.issue_key, e.message));
+  await updatePaymentHolds(cp, cp.status, status).catch((e) => console.error('holds', cp.issue_key, e.message));
   return { status };
 }
 
@@ -148,16 +149,21 @@ export async function reviewMatch({ counterpartyId, entryId, decision, reason },
   if (decision !== 'pending' && why.length < 5) throw new Error('Write the reason for the decision; it goes into the audit record.');
   const [h] = await q('SELECT * FROM hit WHERE counterparty_id = ? AND entry_id = ?', counterpartyId, entryId);
   if (!h) throw new Error('This match is no longer on record.');
-  await q('UPDATE hit SET status = ?, reviewed_by = ?, reviewed_at = ?, reason = ? WHERE counterparty_id = ? AND entry_id = ?',
-    decision, accountId, nowDt(), why || null, counterpartyId, entryId);
+  // Reopening clears the decision from the match; the audit record keeps it.
+  if (decision === 'pending') await q('UPDATE hit SET status = ?, reviewed_by = NULL, reviewed_at = NULL, reason = NULL WHERE counterparty_id = ? AND entry_id = ?', decision, counterpartyId, entryId);
+  else await q('UPDATE hit SET status = ?, reviewed_by = ?, reviewed_at = ?, reason = ? WHERE counterparty_id = ? AND entry_id = ?', decision, accountId, nowDt(), why, counterpartyId, entryId);
   const [cp] = await q('SELECT * FROM counterparty WHERE id = ?', counterpartyId);
   const all = await q('SELECT entry_id, status, active, queried_name FROM hit WHERE counterparty_id = ?', counterpartyId);
   const { status, reason: why2 } = assess(all, cp, await policy());
   await q('UPDATE counterparty SET status = ? WHERE id = ?', status, counterpartyId);
   await logEvents([
-    { counterpartyId, entryId, issueKey: cp.issue_key, type: `match_${decision}`, detail: { matchedName: h.matched_name, score: Number(h.score), reason: why, from: h.status, listVersion: cp.screened_version }, actor: accountId },
+    { counterpartyId, entryId, issueKey: cp.issue_key, type: decision === 'pending' ? 'match_reopened' : `match_${decision}`, detail: { matchedName: h.matched_name, score: Number(h.score), reason: why, from: h.status, listVersion: cp.screened_version }, actor: accountId },
     ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: cp.screened_version }, actor: accountId }] : []),
   ]);
+  if (cp.issue_key && decision === 'pending' && h.status !== 'pending') {
+    await comment(cp.issue_key, [`Sanctions Hold: possible match ${h.matched_name} (${entryId}) reopened for review by `, { mention: accountId }, '.'], NEXT[why2] || NEXT[status])
+      .catch((e) => console.error('comment', e.message));
+  }
   if (cp.issue_key && decision !== 'pending') {
     // An owner or director was screened under their own name; the company under the vendor's.
     const who = h.queried_name && h.queried_name !== cp.name ? 'person' : 'party';
@@ -167,6 +173,7 @@ export async function reviewMatch({ counterpartyId, entryId, decision, reason },
     if (status !== 'review') await removeLabel(cp.issue_key, 'sanctions-review').catch(() => null);
   }
   await syncWorkItem(cp.issue_key, cp.status, status).catch((e) => console.error('status', cp.issue_key, e.message));
+  await updatePaymentHolds(cp, cp.status, status).catch((e) => console.error('holds', cp.issue_key, e.message));
   return { status };
 }
 

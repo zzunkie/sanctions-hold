@@ -4,10 +4,10 @@ import { reconcile, statusOf } from '../core/decision.js';
 import { ownerNames, ownerList, ownerStrings } from '../core/owners.js';
 import { listFacts, birthYearClears, normId, countrySpellings } from '../core/evidence.js';
 import { MIN_ID } from './screen-index.js';
-import { q, marks, insertMany, logEvents, getSetting, nowDt } from './db.js';
+import { q, marks, insertMany, logEvents, logEvent, getSetting, nowDt } from './db.js';
 import { loadIndex } from './screen-index.js';
 import { route } from '@forge/api';
-import { jira, comment, addLabel, createIssue, setProperty, showPanel, adf } from './jira.js';
+import { jira, comment, addLabel, createIssue, setProperty, showPanel, taskType, linkIssues, adf } from './jira.js';
 import { setVendorField } from './vendor-field.js';
 
 export const DEFAULT_POLICY = { threshold: 0.92, ownerRule: 'fifty', birthYearRule: false };
@@ -191,7 +191,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
 
 // An approved vendor without a work item (approved before Sanctions Hold, or imported) gets one in the
 // onboarding project, so that the new match has a place for its review.
-async function openReviewItem(cp, imported) {
+async function openReviewItem(cp, imported, cause) {
   const onboarding = await getSetting('onboarding', null);
   if (!onboarding?.projectKey) return null;
   const approved = cp.approved_at ? new Date(cp.approved_at).toISOString().slice(0, 10) : null;
@@ -202,7 +202,7 @@ async function openReviewItem(cp, imported) {
     labels: cp.source === 'sample' ? ['sanctions-hold-sample'] : [],
     description: adf(imported
       ? `Opened by Sanctions Hold for an existing vendor imported from a CSV file${approved ? ` (approved ${approved})` : ''} after screening at import found a possible match.`
-      : `Opened by Sanctions Hold for an approved vendor${approved ? ` (approved ${approved})` : ''} that had no onboarding work item, because a list update has a possible match for it.`),
+      : `Opened by Sanctions Hold for an approved vendor${approved ? ` (approved ${approved})` : ''} that had no onboarding work item, because ${cause} found a possible match.`),
   });
   // Linked first, so the work item's created event finds the vendor instead of adding a second one.
   await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, cp.id);
@@ -211,24 +211,53 @@ async function openReviewItem(cp, imported) {
   return issue.key;
 }
 
+// With a payments project chosen in Settings, an approved vendor's new match also opens a work item there,
+// linked to the vendor's work item, so the people who pay the vendor hold payments while it is reviewed.
+async function openPaymentHold(cp, lines, cause) {
+  const p = await getSetting('paymentHolds', null);
+  if (!p?.key) return null;
+  const type = await taskType(p.key);
+  if (!type) return null;
+  const issue = await createIssue({
+    project: { key: p.key },
+    issuetype: { id: type.id },
+    summary: `Hold payments to ${cp.name}`.slice(0, 250),
+    description: adf(
+      `Sanctions Hold: ${cause} found a possible match for ${cp.name}, an approved vendor. Hold payments to this vendor until the match is reviewed on ${cp.issue_key}.`,
+      ...lines,
+    ),
+  });
+  await linkIssues(issue.key, cp.issue_key).catch((e) => console.error('link', issue.key, e.message));
+  await logEvent({ type: 'payment_hold_opened', counterpartyId: cp.id, issueKey: cp.issue_key, detail: { workItem: issue.key, project: p.key } });
+  return issue.key;
+}
+
 // An approved vendor matched by a list update, or an existing vendor matched when it is imported: say so on
-// its onboarding work item.
+// its onboarding work item, and open a payment hold when Settings names a payments project.
 async function notifyApprovedMatch({ cp, opened }, cache, reason) {
   const imported = reason === 'imported';
-  if (!cp.issue_key) cp.issue_key = await openReviewItem(cp, imported);
+  // A changed threshold or rule in Settings also screens again; say so rather than name a list update.
+  const settings = /^(threshold|owner rule|year-of-birth rule) /.test(String(reason || ''));
+  const lists = `OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}`;
+  const cause = imported ? 'screening at import' : settings ? 're-screening after a settings change' : 'a sanctions list update';
+  if (!cp.issue_key) cp.issue_key = await openReviewItem(cp, imported, cause);
   if (!cp.issue_key) return;
   const lines = opened.map((o) => {
     const e = cache.index.byEntry.get(o.entryId);
     const list = { SDN: 'OFAC SDN List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' }[e?.list] || 'OFAC Consolidated Sanctions List';
     return `${o.matchedName} (${list}, ${e?.programs || 'no program given'}${e?.countries ? `; ${e.countries}` : ''}), score ${Number(o.score).toFixed(2)} for "${o.queriedName}"`;
   });
+  const hold = await openPaymentHold(cp, lines, cause).catch((e) => { console.error('payment hold', cp.issue_key, e.message); return null; });
   await comment(
     cp.issue_key,
     imported
-      ? `Sanctions Hold: screening this imported vendor against the lists updated OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''} found a possible match.`
-      : `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
+      ? `Sanctions Hold: screening this imported vendor against the lists updated ${lists} found a possible match.`
+      : settings
+        ? `Sanctions Hold: re-screening after a settings change found a possible match for this approved vendor on the lists updated ${lists}.`
+        : `Sanctions Hold: the latest sanctions list update (${lists}) has a possible match for this approved vendor.`,
     ...lines,
     `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Review the match in the Sanctions Hold panel.`,
+    hold ? `${hold} asks the payments team to hold payments to this vendor.` : null,
   );
   await addLabel(cp.issue_key, 'sanctions-review');
   await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));
@@ -246,6 +275,18 @@ async function moveTo(issueKey, statusName) {
 
 // Move a work item to the "Sanctions review" status, where Approve runs the check again.
 export const moveToReview = (issueKey) => moveTo(issueKey, 'Sanctions review');
+
+// When the review that a payment hold waits on ends, the hold's open work items say how it ended.
+export async function updatePaymentHolds(cp, from, to) {
+  if (!cp.issue_key || from !== 'review' || !['cleared', 'blocked'].includes(to)) return;
+  const issue = await jira(route`/rest/api/3/issue/${cp.issue_key}?fields=issuelinks`);
+  const holds = (issue?.fields?.issuelinks || []).map((l) => l.inwardIssue || l.outwardIssue)
+    .filter((i) => i?.fields?.summary?.startsWith('Hold payments to ') && i.fields.status?.statusCategory?.key !== 'done');
+  const text = to === 'cleared'
+    ? `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is cleared. Payments to this vendor can resume.`
+    : `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is blocked. Keep payments to this vendor on hold.`;
+  for (const h of holds) await comment(h.key, text).catch((e) => console.error('hold update', h.key, e.message));
+}
 
 // Keep the work item's status in step with the vendor's: Blocked while a confirmed match blocks it,
 // back to Sanctions review when a reviewer reopens or changes that decision.

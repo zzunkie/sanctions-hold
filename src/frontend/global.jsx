@@ -564,7 +564,7 @@ function Accuracy({ onStarted, finishedAt }) {
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
       <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
       <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries find their entry when searched with the country given for each. None of 10,809 GLEIF companies searched by registration number (1,846 in Russia, 8,963 in 16 other countries and territories) matched another company's entry.</Text>
-      <Text color="color.text.subtle">Year-of-birth rule (measured offline 2026-11-26): the lists sometimes disagree on a person's year of birth. For names on two of the lists, 97 of 6,925 checks of one list's year of birth against the other list's entry give years more than a year apart, so the rule is off by default.</Text>
+      <Text color="color.text.subtle">Year-of-birth rule (measured offline 2026-11-26): for names on two of the lists under the same primary name, 97 of 6,925 checks find birth years more than a year apart, from namesakes or from the lists disagreeing, so the rule is off by default.</Text>
       <Inline space="space.100"><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button>
         <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide sampling details and flagged names' : 'Sampling details and flagged names'}</Button></Inline>
       {method ? (
@@ -606,7 +606,12 @@ function Settings({ onChange, onRemoved, stamp }) {
   const saveReviewers = async (groupId) => {
     try { await call('saveReviewers', { group: groupId ? { groupId } : null }); setMsg({ appearance: 'success', text: groupId ? 'Saved. Only members of that group decide possible matches.' : 'Saved. Anyone who can open the work item decides possible matches.' }); reload(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
   };
+  const savePaymentHolds = async (projectKey) => {
+    try { await call('savePaymentHolds', { projectKey: projectKey || null }); setMsg({ appearance: 'success', text: projectKey ? 'Saved. An approved vendor with a new possible match gets a payment hold in that project.' : 'Saved. No payment holds are opened.' }); reload(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
+  };
   if (loading || !data) return <Spinner label="Loading settings" />;
+  const noHolds = { label: 'No payment holds', value: '' };
+  const holdOptions = [noHolds, ...data.available.filter((p) => p.key !== data.onboardingKey).map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }))];
   const anyone = { label: 'Anyone who can open the work item', value: '' };
   const groupOptions = [anyone, ...(data.groups || []).map((g) => ({ label: g.name, value: g.groupId }))];
   const current = THRESHOLDS.find((t) => t.value === data.policy.threshold) || { value: data.policy.threshold, label: String(data.policy.threshold) };
@@ -633,6 +638,11 @@ function Settings({ onChange, onRemoved, stamp }) {
         <Heading size="small">Who decides possible matches</Heading>
         <Text color="color.text.subtle">With a Jira group chosen, only its members decide possible matches and listed minority owners or directors. Everyone else sees the evidence.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="reviewers" isDisabled={off} value={data.reviewers ? { label: data.reviewers.name, value: data.reviewers.groupId } : anyone} options={groupOptions} onChange={(o) => o && saveReviewers(o.value)} /></Box>
+      </Stack>
+      <Stack space="space.100">
+        <Heading size="small">Payment holds</Heading>
+        <Text color="color.text.subtle">With a project chosen, when a list update, an import or a change in these settings finds a possible match for an approved vendor, the app also opens a work item "Hold payments to …" in that project, linked to the vendor's work item, so the payments team can hold payments until the match is decided.</Text>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="payment-holds" isDisabled={off} value={data.paymentHolds ? { label: `${data.paymentHolds.name} (${data.paymentHolds.key})`, value: data.paymentHolds.key } : noHolds} options={holdOptions} onChange={(o) => o && savePaymentHolds(o.value)} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Projects screened automatically</Heading>

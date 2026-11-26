@@ -123,7 +123,16 @@ define('getSettings', async (_, ctx) => ({
   admin: await isJiraAdmin(ctx.accountId).catch(() => false),
   policy: await getPolicy(), projects: await getSetting('projects', []), available: await listProjects().catch(() => []),
   reviewers: await getSetting('reviewers', null), groups: await findGroups().catch(() => []),
+  paymentHolds: await getSetting('paymentHolds', null), onboardingKey: (await getSetting('onboarding', null))?.projectKey || null,
 }));
+define('savePaymentHolds', async ({ projectKey }, ctx) => {
+  await assertAdmin(ctx);
+  const p = projectKey ? (await listProjects()).find((x) => x.key === projectKey) : null;
+  if (projectKey && !p) throw new Error('That project was not found.');
+  await setSetting('paymentHolds', p ? { key: p.key, name: p.name } : null);
+  await logEvent({ type: 'payment_holds_changed', detail: { project: p?.key || null }, actor: ctx.accountId });
+  return { paymentHolds: p ? { key: p.key, name: p.name } : null };
+});
 define('saveReviewers', async ({ group }, ctx) => {
   await assertAdmin(ctx);
   const g = group?.groupId ? (await findGroups()).find((x) => x.groupId === group.groupId) : null;
