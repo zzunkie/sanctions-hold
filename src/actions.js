@@ -3,7 +3,7 @@
 import { route } from '@forge/api';
 import { ensureSchema, q, iso, dt, logEvent, getSetting } from './backend/db.js';
 import { loadIndex } from './backend/screen-index.js';
-import { screenNames, getPolicy, screenCounterparties } from './backend/screening.js';
+import { screenNames, getPolicy, screenCounterparties, registrationHits } from './backend/screening.js';
 import { counterpartyView, createCounterparty, NEXT } from './backend/counterparties.js';
 import { jira, adf, setProperty, comment, createIssue } from './backend/jira.js';
 import { setVendorField } from './backend/vendor-field.js';
@@ -42,7 +42,7 @@ const callerOf = (payload, context) => context?.principal?.accountId || payload?
 // ("Lowlands Metal Trading" and "Lowlands Metal Trading B.V.").
 async function findKnown(name, { withIssue = false } = {}) {
   const first = name.split(/\s+/)[0].replace(/[\\%_]/g, (c) => `\\${c}`);
-  const rows = await q(`SELECT id, name, status, issue_key, owners FROM counterparty WHERE LOWER(name) LIKE LOWER(?)${withIssue ? ' AND issue_key IS NOT NULL' : ''} ORDER BY created_at DESC LIMIT 100`, `${first}%`);
+  const rows = await q(`SELECT id, name, status, issue_key, owners, country, reg_no FROM counterparty WHERE LOWER(name) LIKE LOWER(?)${withIssue ? ' AND issue_key IS NOT NULL' : ''} ORDER BY created_at DESC LIMIT 100`, `${first}%`);
   const key = compact(name);
   return rows.find((r) => r.name === name) || rows.find((r) => compact(r.name) === key) || null;
 }
@@ -66,7 +66,8 @@ export async function screenCounterparty(payload, context) {
   const bornOf = new Map([...storedOwners, ...givenOwners].filter((o) => o.born).map((o) => [compact(o.name), String(o.born).slice(0, 4)]));
   // A reviewer's decision on a known vendor's match; one the year-of-birth rule made is decided again below.
   const reviewed = known ? new Map((await counterpartyView(known.id)).hits.filter((h) => h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year').map((h) => [h.entryId, h.status])) : new Map();
-  const found = screenNames(cache.index, [name, ...owners], threshold);
+  const registrationNumber = text(payload?.registrationNumber, 64) || known?.reg_no || null;
+  const found = registrationHits(cache, screenNames(cache.index, [name, ...owners], threshold), { name, registrationNumber, country: text(payload?.country, 60) || known?.country || null });
   // The in-memory index keeps no remarks. Read them for EU entries, whose reference number is in the remarks,
   // and, with the year-of-birth rule on, for entries matched to an owner with a year of birth.
   const euIds = [...found.keys()].filter((id) => cache.index.byEntry.get(id)?.list === 'EU').slice(0, 10);
@@ -83,7 +84,7 @@ export async function screenCounterparty(payload, context) {
     const listed = born ? listFacts({ remarks: remarks.get(entryId) }).years : [];
     const byRule = !reviewed.get(entryId) && born && birthYearClears(born, listed);
     return {
-      listEntry: entryId, ...euRef(e && { list: e.list, remarks: remarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedName,
+      listEntry: entryId, ...euRef(e && { list: e.list, remarks: remarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedOn ? `registration number (${f.matchedOn})` : f.matchedName,
       screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
       reviewed: reviewed.get(entryId) || (byRule ? 'year-of-birth rule' : null),
       ...(byRule ? { yearOfBirthRule: `born ${born}; the list entry gives ${listed.join(', ')}` } : {}),
@@ -93,9 +94,19 @@ export async function screenCounterparty(payload, context) {
   const confirmed = matches.filter((m) => m.reviewed === 'confirmed');
   const REVIEWED = { confirmed: ', confirmed by a reviewer', dismissed: ', dismissed by a reviewer as not the same party' };
   await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version, via: viaOf(payload) }, actor: callerOf(payload, context) || viaOf(payload) });
+  // OFAC puts some parties on both the SDN List and the Consolidated list under one entry number: say them once.
+  const ofacNo = (m) => (/^(SDN|CONS):/.test(m.listEntry) ? m.listEntry.split(':')[1] : null);
+  const said = [];
+  for (const m of matches) {
+    const twin = said.find((x) => ofacNo(x) && ofacNo(x) === ofacNo(m) && x.screenedName === m.screenedName);
+    if (twin) {
+      twin.list = 'OFAC SDN List and Consolidated Sanctions List';
+      twin.programs = [...new Set([twin.programs, m.programs].filter(Boolean).flatMap((p) => p.split('; ')))].join('; ') || null;
+    } else said.push({ ...m });
+  }
   const head = open.length ? 'Possible match' : matches.every((m) => m.yearOfBirthRule) ? `${matches.length === 1 ? 'Match' : 'Matches'} cleared by the year-of-birth rule` : 'Reviewed match';
   const answer = matches.length
-    ? `${head} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || (m.yearOfBirthRule ? `, cleared by the year-of-birth rule (${m.yearOfBirthRule})` : '')}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
+    ? `${head} for "${name}": ${said.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.matchedOn.startsWith('registration number') ? `${m.matchedOn} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || (m.yearOfBirthRule ? `, cleared by the year-of-birth rule (${m.yearOfBirthRule})` : '')}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
     : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists (updated ${cache.state.published})${cache.state.ukPublished ? `, the UK Sanctions List (updated ${cache.state.ukPublished})` : ''}${cache.state.euPublished ? ` or the EU Consolidated Financial Sanctions List (updated ${cache.state.euPublished})` : ''}.`;
   // A known vendor is answered from its record first, where the reviewers' decisions are.
   const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}.${stored.length ? ` Screened with the owners and directors on its record (${stored.join(', ')}).` : ''} ` : '';
@@ -238,7 +249,7 @@ export async function matchEvidence(payload, context) {
     const listedCountries = String(e?.countries || '').toLowerCase();
     const sameCountry = !owner && cp.country && listedCountries ? (countrySpellings(cp.country).some((x) => listedCountries.includes(x)) ? 'same' : 'differs') : null;
     return {
-      listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
+      listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedOn ? `registration number (${h.matchedOn})` : h.matchedName, score: h.score,
       review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : 'dismissed as not the same party',
       reviewReason: h.reason || null,
       foundFor: owner

@@ -90,7 +90,7 @@ function JiraSetup({ setup, onDone }) {
       actions={[<SectionMessageAction key="go" onClick={start}>{state?.state === 'error' ? 'Try again' : 'Create the project'}</SectionMessageAction>]}
     >
       {state?.state === 'error' ? <Text>{state.error}</Text> : null}
-      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or is blocked by a confirmed match. With the sample vendors loaded, it also adds nine onboarding requests, and moves the ones with a possible match to Sanctions review. To use your own workflow instead, see Settings.</Text>
+      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or is blocked by a confirmed match. With the sample vendors loaded, it also adds ten onboarding requests, and moves the ones with a possible match to Sanctions review. To use your own workflow instead, see Settings.</Text>
     </SectionMessage>
   );
 }
@@ -135,6 +135,8 @@ const EVENT_TEXT = {
   review_note_added: 'Review notes added by an agent',
   reviewers_changed: 'Reviewer group changed',
 };
+// A match the year-of-birth rule had cleared, open again because the rule was turned off or the year changed.
+const byRuleOff = (e) => Boolean(e.detail?.ruleOff) || /^year-of-birth rule/.test(e.detail?.reason || '');
 // Agent events name the surface that called the tool.
 const VIA = { rovo: 'the Rovo agent', mcp: 'an MCP client' };
 const eventLabel = (e) => {
@@ -143,6 +145,7 @@ const eventLabel = (e) => {
   if (via && e.type === 'counterparty_added') return `Request opened by ${via}`;
   if (via && e.type === 'review_note_added') return `Review notes by ${via}`;
   if (e.type === 'match_dismissed' && e.actor === 'rule:birth-year') return 'Cleared by the year-of-birth rule';
+  if (e.type === 'match_reopened' && byRuleOff(e)) return 'Reopened: no longer cleared by the year-of-birth rule';
   return EVENT_TEXT[e.type] || e.type;
 };
 
@@ -153,7 +156,9 @@ function eventDetail(e) {
   const d = e.detail || {};
   if (e.type === 'list_updated') return d.initial ? `first import, lists updated ${listDates(d)}: ${Number(d.entries).toLocaleString('en-US')} entries${d.heldBack ? ' (newest SDN designations held back)' : ''}` : `lists updated ${listDates(d)}: ${d.added} added, ${d.removed} removed, ${d.changed} changed`;
   if (e.type === 'rescreen_all') return `${d.counterparties} vendors, ${d.newMatches} new possible matches`;
-  if (e.type.startsWith('match_')) return `${d.matchedName}, ${LIST_SHORT[String(e.entry_id).split(':')[0]] || 'list'} (${score(d.score)})${d.reason && e.type !== 'match_found' ? `: ${d.reason}` : ''}`;
+  // The reason of a rescreen ends with the account that changed Settings; the audit record keeps it, the table does not show it.
+  const why = e.type === 'match_found' || byRuleOff(e) ? '' : String(d.reason || '').replace(/ by [0-9a-f]+:[0-9a-f-]+$/i, '');
+  if (e.type.startsWith('match_')) return `${d.matchedName}, ${LIST_SHORT[String(e.entry_id).split(':')[0]] || 'list'} (${d.matchedOn ? d.matchedOn : score(d.score)})${why ? `: ${why}` : ''}`;
   if (e.type === 'approved') return `screening result: ${STATUS[d.status]?.label || d.status}; lists updated ${fmtVersion(d.listVersion)}`;
   if (e.type === 'screened_by_tool') return `${d.owners?.length ? `with ${d.owners.join(', ')}: ` : ''}${d.matches ? `${d.matches} ${d.matches === 1 ? 'match' : 'matches'}` : 'no match'}`;
   if (e.type === 'counterparty_added') return (d.owners || []).join(', ');
@@ -164,7 +169,8 @@ function eventDetail(e) {
 function Overview({ data, reload, goReview }) {
   const [busy, setBusy] = useState(false);
   const c = data.counts;
-  const held = data.list?.holdBackFrom;
+  // Hidden while an import runs: the replay is already under way.
+  const held = data.list?.holdBackFrom && !['running', 'queued'].includes(data.jobs?.import?.state);
   const replay = async () => { setBusy(true); try { await call('replayDesignations'); reload(); } finally { setBusy(false); } };
   return (
     <Stack space="space.300">
@@ -265,13 +271,13 @@ function ReviewQueue({ onChange, stamp }) {
     <Stack space="space.200">
       {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
-        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country, or nationality and year of birth (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
+        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Found by' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Vendor and list entry' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
             // A vendor with several possible matches is named once, on its first row.
             { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? '' : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
-            { key: 'q', content: h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
+            { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
             { key: 's', content: score(h.score) },
@@ -433,8 +439,8 @@ function Vendors({ onChange, stamp }) {
       )}
       <Heading size="small">Add a vendor</Heading>
       <VendorForm submitLabel="Add and screen" onSubmit={async (v) => { const r = await call('addCounterparty', v); setOpen(r.view.counterparty.id); list.reload(); onChange(); }} />
-      <Heading size="small">Import vendors</Heading>
-      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), and optionally the registered address and the registration or license number. Every vendor is screened right after the import.</Text>
+      <Heading size="small">Import the vendors you already work with</Heading>
+      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened now and after every list update, and a possible match opens a work item in the onboarding project.</Text>
       <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
       {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
       <ModalTransition>{open ? <VendorModal id={open} onClose={(changed) => { setOpen(null); if (changed) { list.reload(); onChange(); } }} /> : null}</ModalTransition>
@@ -552,12 +558,17 @@ function Accuracy({ onStarted, finishedAt }) {
       <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
       <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
-      <ByCountry r={shown} />
-      {last?.fpSamples?.length ? <Text color="color.text.subtle">{`Flagged company names: ${last.fpSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
-      {last?.peopleSamples?.length ? <Text color="color.text.subtle">{`Flagged person names: ${last.peopleSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
+      <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries (vessels and aircraft left out) find their entry when searched with the country given for each.</Text>
       <Inline space="space.100"><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button>
-        <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide how the samples were drawn' : 'How the samples were drawn'}</Button></Inline>
-      {method ? <Text color="color.text.subtle">{`${last ? `On this site, the list entries are a random draw of their own from the lists as loaded, the real names are the same, and a search took ${last.avgMs.toFixed(1)} ms on average against ${num(last.listNames)} list names. ` : ''}${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text> : null}
+        <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide sampling details and flagged names' : 'Sampling details and flagged names'}</Button></Inline>
+      {method ? (
+        <Stack space="space.100">
+          <Text color="color.text.subtle">{`${last ? `On this site, the list entries are a random draw of their own from the lists as loaded, the real names are the same, and a search took ${last.avgMs.toFixed(1)} ms on average against ${num(last.listNames)} list names. ` : ''}${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text>
+          <ByCountry r={shown} />
+          {last?.fpSamples?.length ? <Text color="color.text.subtle">{`Flagged company names: ${last.fpSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
+          {last?.peopleSamples?.length ? <Text color="color.text.subtle">{`Flagged person names: ${last.peopleSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
@@ -593,33 +604,35 @@ function Settings({ onChange, onRemoved, stamp }) {
   const anyone = { label: 'Anyone who can open the work item', value: '' };
   const groupOptions = [anyone, ...(data.groups || []).map((g) => ({ label: g.name, value: g.groupId }))];
   const current = THRESHOLDS.find((t) => t.value === data.policy.threshold) || { value: data.policy.threshold, label: String(data.policy.threshold) };
+  const off = !data.admin;
   return (
     <Stack space="space.300">
+      <Text color="color.text.subtle">{off ? 'Only Jira admins can change these settings. You can see them here.' : 'Only Jira admins can change these settings.'}</Text>
       <Stack space="space.100">
         <Heading size="small">Match threshold</Heading>
         <Text color="color.text.subtle">Names scoring at or above the threshold go to the review queue. The rates come from the accuracy test.</Text>
-        <Box xcss={xcss({ width: '640px' })}><Select inputId="threshold" value={current} options={THRESHOLDS} onChange={(o) => o && save({ threshold: o.value, ownerRule: data.policy.ownerRule })} /></Box>
+        <Box xcss={xcss({ width: '640px' })}><Select inputId="threshold" isDisabled={off} value={current} options={THRESHOLDS} onChange={(o) => o && save({ threshold: o.value, ownerRule: data.policy.ownerRule })} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Listed owners and directors</Heading>
         <Text color="color.text.subtle">With the ownership rules, confirmed owners block the vendor under the rule of the list that names them: OFAC-listed or EU-listed owners holding 50% or more together, or one UK-listed owner holding more than 50%. A confirmed owner without a share also blocks. Otherwise, and for directors, a reviewer decides whether to proceed or block.</Text>
-        <Box xcss={xcss({ width: '480px' })}><Select inputId="owner-rule" value={OWNER_RULES.find((r) => r.value === (data.policy.ownerRule || 'fifty'))} options={OWNER_RULES} onChange={(o) => o && save({ threshold: data.policy.threshold, ownerRule: o.value })} /></Box>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="owner-rule" isDisabled={off} value={OWNER_RULES.find((r) => r.value === (data.policy.ownerRule || 'fifty'))} options={OWNER_RULES} onChange={(o) => o && save({ threshold: data.policy.threshold, ownerRule: o.value })} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Year of birth</Heading>
         <Text color="color.text.subtle">With the rule on, a possible match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. A range of years on the entry counts as every year in it, and a circa year as two years either side. The audit record and the work item note each match the rule cleared, and the match comes back for review if the year of birth or the list entry changes.</Text>
-        <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" isDisabled={off} value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Who decides possible matches</Heading>
-        <Text color="color.text.subtle">With a Jira group chosen, only its members decide possible matches and listed minority owners or directors, so the person who requests a vendor does not clear it. Everyone else sees the evidence. Only a Jira admin can change this setting.</Text>
-        <Box xcss={xcss({ width: '480px' })}><Select inputId="reviewers" value={data.reviewers ? { label: data.reviewers.name, value: data.reviewers.groupId } : anyone} options={groupOptions} onChange={(o) => o && saveReviewers(o.value)} /></Box>
+        <Text color="color.text.subtle">With a Jira group chosen, only its members decide possible matches and listed minority owners or directors. Everyone else sees the evidence.</Text>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="reviewers" isDisabled={off} value={data.reviewers ? { label: data.reviewers.name, value: data.reviewers.groupId } : anyone} options={groupOptions} onChange={(o) => o && saveReviewers(o.value)} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Projects screened automatically</Heading>
         <Text color="color.text.subtle">A work item created in these projects is screened under its summary, the vendor's legal name, with the country, owners and directors in its Vendor details field.</Text>
         <Box xcss={xcss({ width: '480px' })}>
-          <Select inputId="projects" isMulti value={data.projects.map((p) => ({ label: p, value: p }))} options={data.available.map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }))} onChange={(o) => save({ threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, projects: (o || []).map((x) => x.value) })} />
+          <Select inputId="projects" isMulti isDisabled={off} value={data.projects.map((p) => ({ label: p, value: p }))} options={data.available.map((p) => ({ label: `${p.name} (${p.key})`, value: p.key }))} onChange={(o) => save({ threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, projects: (o || []).map((x) => x.value) })} />
         </Box>
         <Text color="color.text.subtle">To add the check to a workflow you already use: in a company-managed project, open the workflow, select the approval transition, add the validator "Vendor is cleared on the sanctions lists" and publish.</Text>
       </Stack>
@@ -631,7 +644,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Sample data</Heading>
-        <Inline><Button appearance="warning" onClick={async () => { await call('removeSample'); onRemoved(); }}>Remove the sample vendors</Button></Inline>
+        <Inline><Button appearance="warning" isDisabled={off} onClick={async () => { try { await call('removeSample'); onRemoved(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); } }}>Remove the sample vendors</Button></Inline>
       </Stack>
       {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
     </Stack>
@@ -641,8 +654,15 @@ function Settings({ onChange, onRemoved, stamp }) {
 function App() {
   const overview = useLoad('overview', {}, []);
   const [tab, setTab] = useState(0);
-  if (overview.loading && !overview.data) return <Spinner label="Loading Sanctions Hold" />;
-  if (overview.error) return <SectionMessage appearance="error" title="Sanctions Hold could not load"><Text>{overview.error}</Text></SectionMessage>;
+  // Right after an install the first calls also set up the app's tables and can time out; try again a few times.
+  const [tries, setTries] = useState(0);
+  useEffect(() => {
+    if (!overview.error || tries >= 3) return undefined;
+    const t = setTimeout(() => { setTries((n) => n + 1); overview.reload(); }, 4000);
+    return () => clearTimeout(t);
+  }, [overview.error, tries]); // eslint-disable-line react-hooks/exhaustive-deps
+  if ((overview.loading && !overview.data) || (overview.error && tries < 3)) return <Spinner label="Loading Sanctions Hold" />;
+  if (overview.error) return <SectionMessage appearance="error" title="Sanctions Hold could not load" actions={[<SectionMessageAction key="retry" onClick={() => { setTries(0); overview.reload(); }}>Try again</SectionMessageAction>]}><Text>{overview.error}</Text></SectionMessage>;
   const d = overview.data;
   const busy = Object.values(d.jobs).some((j) => j && (j.state === 'running' || j.state === 'queued'));
   // Tabs stay mounted; this changes when a job or a decision changes what they show.

@@ -96,6 +96,11 @@ export function demoVendors(now = Date.now()) {
       note: 'Two owners with 30% and 25% are on the EU list only. The EU adds up the holdings of listed owners, so once both are confirmed their 55% blocks it.',
     },
     {
+      key: 'd-renamed', name: 'Coastline Auto Spares Trading LLC', country: 'AE', owners: [], approvedAt: null, request: true,
+      registrationNumber: '510808',
+      note: 'A new name that matches no list entry, with the license number an SDN entry gives for a listed company.',
+    },
+    {
       key: 'd-later-us', name: 'Berkeley Trading LLC', country: 'US', owners: [], approvedAt: new Date(now - 210 * DAY).toISOString(),
       address: '1500 Market Street, Philadelphia, PA', registrationNumber: 'PA-7316652',
       note: 'Same name as a later designation in another country, with a different registration number.',
@@ -104,7 +109,7 @@ export function demoVendors(now = Date.now()) {
 }
 
 export function sampleVendors(now = Date.now()) {
-  return [...demoVendors(now), ...ordinaryVendors(187, now)];
+  return [...demoVendors(now), ...ordinaryVendors(186, now)];
 }
 
 // The demo holds back the newest SDN designations at the first import and adds them back as a

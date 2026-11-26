@@ -82,6 +82,7 @@ export function reconcile(existing, found) {
       score: f.score,
       matched_name: f.matchedName,
       queried_name: f.queriedName,
+      matched_on: f.matchedOn || null,
       entry_hash: f.entryHash,
       isNew: !h,
       reviewed: status === 'pending' ? null : h,

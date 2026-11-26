@@ -47,6 +47,8 @@ export async function queueJob(type, body = {}) {
 
 export async function hourlyCheck() {
   await ensureSchema();
+  // While the sample holds back the newest designations, Replay brings in the latest lists, so the check waits.
+  if ((await listState())?.holdBackFrom) return;
   const r = await checkForUpdate();
   if (r.changed) await queueJob('import', { reason: 'new list publication' });
 }

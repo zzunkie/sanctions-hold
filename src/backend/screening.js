@@ -2,7 +2,8 @@
 import { screen } from '../core/match.js';
 import { reconcile, statusOf } from '../core/decision.js';
 import { ownerNames, ownerList, ownerStrings } from '../core/owners.js';
-import { listFacts, birthYearClears } from '../core/evidence.js';
+import { listFacts, birthYearClears, normId, countrySpellings } from '../core/evidence.js';
+import { MIN_ID } from './screen-index.js';
 import { q, marks, insertMany, logEvents, getSetting, nowDt } from './db.js';
 import { loadIndex } from './screen-index.js';
 import { route } from '@forge/api';
@@ -30,6 +31,24 @@ export function screenNames(index, names, threshold) {
   return found;
 }
 
+// A list entry that gives the vendor's registration, license or tax number is a possible match under any
+// name. The number must be the one registered in the vendor's country: the country written next to it on the
+// entry, or else one of the entry's countries.
+export function registrationHits(cache, found, { name, registrationNumber, country }) {
+  const key = normId(registrationNumber);
+  if (!cache?.ids || key.length < MIN_ID) return found;
+  const places = country ? countrySpellings(country).concat(String(country).toLowerCase()) : null;
+  for (const x of cache.ids.get(key) || []) {
+    const e = cache.index.byEntry.get(x.entryId);
+    if (!e) continue;
+    const where = (x.country || e.countries || '').toLowerCase();
+    if (places && where && !places.some((p) => where.includes(p))) continue;
+    if (found.has(x.entryId)) continue;
+    found.set(x.entryId, { score: 1, matchedName: e.name, queriedName: name, entryHash: e.hash, matchedOn: `${x.label} ${x.value}`.slice(0, 128) });
+  }
+  return found;
+}
+
 async function rowsIn(sqlText, ids) {
   const out = [];
   for (let i = 0; i < ids.length; i += 300) {
@@ -39,7 +58,7 @@ async function rowsIn(sqlText, ids) {
   return out;
 }
 
-const HIT_COLS = ['counterparty_id', 'entry_id', 'queried_name', 'matched_name', 'score', 'status', 'active', 'entry_hash', 'found_at', 'found_version'];
+const HIT_COLS = ['counterparty_id', 'entry_id', 'queried_name', 'matched_name', 'score', 'status', 'active', 'entry_hash', 'found_at', 'found_version', 'matched_on'];
 
 // ids: counterparty ids, or null for all. Returns counts and the approved vendors newly matched.
 export async function screenCounterparties(ids = null, { actor = 'app', reason = 'screen' } = {}) {
@@ -67,7 +86,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   const ruled = [];
   const unruled = [];
   const ruleNotes = [];
-  const founds = cps.map((cp) => screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold));
+  const founds = cps.map((cp) => registrationHits(cache, screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold), { name: cp.name, registrationNumber: cp.reg_no, country: cp.country }));
   // Years of birth on the entries matched to an owner or director with a year of birth, for the year-of-birth rule.
   const years = new Map();
   if (policy.birthYearRule) {
@@ -102,12 +121,12 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
       } else if (byRule) {
         unruled.push([cp.id, h.entry_id]);
         backHere.push({ entryId: h.entry_id, detail: { matchedName: h.matched_name, reason: o?.born ? `${o.name}, born ${String(o.born).slice(0, 4)}.` : `${h.queried_name}.` } });
-        r.opened.push({ entryId: h.entry_id, reopened: true, matchedName: h.matched_name, queriedName: h.queried_name, score: h.score, entryHash: h.entry_hash });
+        r.opened.push({ entryId: h.entry_id, reopened: true, ruleOff: true, matchedName: h.matched_name, queriedName: h.queried_name, score: h.score, entryHash: h.entry_hash });
       }
     }
     const opened = new Set(r.opened.map((o) => o.entryId));
     for (const h of r.rows) {
-      const vals = [cp.id, h.entry_id, h.queried_name, h.matched_name, h.score, h.status, 1, h.entry_hash, now, version];
+      const vals = [cp.id, h.entry_id, h.queried_name, h.matched_name, h.score, h.status, 1, h.entry_hash, now, version, h.matched_on || null];
       (opened.has(h.entry_id) ? fresh : kept).push(vals);
     }
     for (const e of r.lapsed) lapsed.push([cp.id, e]);
@@ -121,7 +140,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
       events.push({
         counterpartyId: cp.id, entryId: o.entryId, issueKey: cp.issue_key, actor,
         type: o.reopened ? 'match_reopened' : 'match_found',
-        detail: { matchedName: o.matchedName, queriedName: o.queriedName, score: o.score, listVersion: version, reason },
+        detail: { matchedName: o.matchedName, queriedName: o.queriedName, score: o.score, ...(o.matchedOn ? { matchedOn: o.matchedOn } : {}), ...(o.ruleOff ? { ruleOff: true } : {}), listVersion: version, reason },
       });
     }
     events.push(...ruleEvents);
@@ -141,7 +160,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     else if (cp.issue_key && status !== cp.status && (status === 'blocked' || cp.status === 'blocked' || (!cp.approved_at && status === 'review'))) newlyHeld.push([cp.issue_key, cp.status, status]);
   }
   const update = `ON DUPLICATE KEY UPDATE queried_name = VALUES(queried_name), matched_name = VALUES(matched_name), score = VALUES(score),
-                  status = VALUES(status), active = 1, entry_hash = VALUES(entry_hash)`;
+                  status = VALUES(status), active = 1, entry_hash = VALUES(entry_hash), matched_on = VALUES(matched_on)`;
   await insertMany('hit', HIT_COLS, fresh, { onDuplicate: `${update}, found_at = VALUES(found_at), found_version = VALUES(found_version)` });
   await insertMany('hit', HIT_COLS, kept, { onDuplicate: update });
   const at = nowDt();
@@ -162,14 +181,14 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
   await logEvents(events);
   for (const [k, head, lines] of ruleNotes) await comment(k, head, ...lines).catch((e) => console.error('rule note', k, e.message));
-  for (const m of approvedMatched) await notifyApprovedMatch(m, cache).catch((e) => console.error('notify', m.cp.issue_key, e.message));
+  for (const m of approvedMatched) await notifyApprovedMatch(m, cache, reason).catch((e) => console.error('notify', m.cp.issue_key, e.message));
   for (const [k, from, to] of newlyHeld) await syncWorkItem(k, from, to).catch((e) => console.error('hold', k, e.message));
   return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
 }
 
 // An approved vendor without a work item (approved before Sanctions Hold, or imported) gets one in the
 // onboarding project, so that the new match has a place for its review.
-async function openReviewItem(cp) {
+async function openReviewItem(cp, imported) {
   const onboarding = await getSetting('onboarding', null);
   if (!onboarding?.projectKey) return null;
   const approved = cp.approved_at ? new Date(cp.approved_at).toISOString().slice(0, 10) : null;
@@ -178,7 +197,9 @@ async function openReviewItem(cp) {
     issuetype: { id: onboarding.taskTypeId },
     summary: cp.name.slice(0, 250),
     labels: cp.source === 'sample' ? ['sanctions-hold-sample'] : [],
-    description: adf(`Opened by Sanctions Hold for an approved vendor${approved ? ` (approved ${approved})` : ''} that had no onboarding work item, because a list update has a possible match for it.`),
+    description: adf(imported
+      ? `Opened by Sanctions Hold for an existing vendor imported from a CSV file${approved ? ` (approved ${approved})` : ''} after screening at import found a possible match.`
+      : `Opened by Sanctions Hold for an approved vendor${approved ? ` (approved ${approved})` : ''} that had no onboarding work item, because a list update has a possible match for it.`),
   });
   // Linked first, so the work item's created event finds the vendor instead of adding a second one.
   await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, cp.id);
@@ -187,9 +208,11 @@ async function openReviewItem(cp) {
   return issue.key;
 }
 
-// An approved vendor matched by a list update: say so on its onboarding work item.
-async function notifyApprovedMatch({ cp, opened }, cache) {
-  if (!cp.issue_key) cp.issue_key = await openReviewItem(cp);
+// An approved vendor matched by a list update, or an existing vendor matched when it is imported: say so on
+// its onboarding work item.
+async function notifyApprovedMatch({ cp, opened }, cache, reason) {
+  const imported = reason === 'imported';
+  if (!cp.issue_key) cp.issue_key = await openReviewItem(cp, imported);
   if (!cp.issue_key) return;
   const lines = opened.map((o) => {
     const e = cache.index.byEntry.get(o.entryId);
@@ -198,9 +221,11 @@ async function notifyApprovedMatch({ cp, opened }, cache) {
   });
   await comment(
     cp.issue_key,
-    `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
+    imported
+      ? `Sanctions Hold: screening this imported vendor against the lists updated OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''} found a possible match.`
+      : `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
     ...lines,
-    'The vendor is back in the review queue and this work item moves to Sanctions review. Decide in the Sanctions Hold panel whether it is the same party.',
+    `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Open Sanctions Hold from the work item's Apps button to review the match.`,
   );
   await addLabel(cp.issue_key, 'sanctions-review');
   await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));

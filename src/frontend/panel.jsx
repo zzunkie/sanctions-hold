@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, { Stack, Inline, Text, Button, Textfield, Label, Spinner, SectionMessage, Heading, useProductContext } from '@forge/react';
-import { call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, fmtTime, fmtVersion, countryName, listDates } from './common.jsx';
+import { call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, fmtTime, fmtVersion, countryName, listDates, useReviewAccess } from './common.jsx';
 import { formatOwner } from '../core/owners.js';
 
 const STATUS_NOTE = {
@@ -21,6 +21,7 @@ function Panel() {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const access = useReviewAccess();
   const load = () => call('issueView', { issueKey }).then((r) => {
     setData(r);
     const cp = r.view?.counterparty;
@@ -65,20 +66,25 @@ function Panel() {
           <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>
           <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
           {note ? <Text>{note}</Text> : null}
-          <OwnershipNote view={view} onDone={load} />
+          <OwnershipNote view={view} onDone={load} compact={compact} />
           {open.map((h) => {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
-                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? (h.reviewedBy === 'rule:birth-year' ? 'Cleared match' : 'Dismissed match') : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
+                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? (h.reviewedBy === 'rule:birth-year' ? 'Cleared match' : 'Dismissed match') : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : h.matchedOn ? 'the registration number' : 'the company name'}`}</Heading>
                 {h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} compact={compact} />
                 <ReviewedNote hit={h} />
-                {h.status === 'pending' ? <ReviewForm hit={h} cp={cp} onDone={load} /> : null}
+                {h.status === 'pending' && !compact ? <ReviewForm hit={h} cp={cp} onDone={load} /> : null}
               </Stack>
             );
           })}
-          {compact && open.length ? <Text color="color.text.subtle">The wider panel under the work item's Apps button shows each full list entry side by side with the vendor.</Text> : null}
+          {/* The sidebar is a summary; reviewers decide in the wider panel, next to the full list entries. */}
+          {compact && (open.some((h) => h.status === 'pending') || view?.assessment?.reason === 'minority')
+            ? <Text color="color.text.subtle">{access && !access.allowed
+              ? `Decisions here are made by members of the Jira group ${access.group}. Open Sanctions Hold from the work item's Apps button to see each full list entry beside the vendor.`
+              : "To decide, open Sanctions Hold from the work item's Apps button. It shows each full list entry beside the vendor."}</Text>
+            : compact && open.length ? <Text color="color.text.subtle">Open Sanctions Hold from the work item's Apps button to see each full list entry beside the vendor.</Text> : null}
           {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (

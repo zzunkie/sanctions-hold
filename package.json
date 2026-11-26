@@ -2,7 +2,7 @@
   "name": "sanctions-hold",
   "version": "0.1.0",
   "private": true,
-  "description": "Forge app for Jira: screen vendors and their owners against the OFAC and UK sanctions lists and hold approval until a reviewer decides",
+  "description": "Forge app for Jira: screen vendors and their owners against the OFAC, UK and EU sanctions lists and hold approval until a reviewer decides",
   "scripts": {
     "test": "node --test test/*.test.js",
     "accuracy": "node scripts/accuracy.mjs"

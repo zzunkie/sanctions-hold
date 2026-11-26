@@ -12,6 +12,8 @@ const country = (c) => clean(c, 8).toUpperCase() || null;
 const owners = (o) => ownerStrings(o).map((s) => clean(s, 200));
 const address = (a) => clean(a, 300) || null;
 const regNo = (r) => clean(r, 64) || null;
+// The date an imported vendor was approved, as YYYY-MM-DD; without one, the import date.
+const approvedOn = (d, now) => (/^\d{4}-\d{2}-\d{2}$/.test(clean(d, 10)) && !Number.isNaN(Date.parse(clean(d, 10))) ? dt(clean(d, 10)) : now);
 const policy = async () => ({ threshold: 0.92, ownerRule: 'fifty', birthYearRule: false, ...(await getSetting('policy', {})) });
 
 export async function createCounterparty({ name, country: c, owners: o, address: a = null, registrationNumber: r = null, issueKey = null, source, approvedAt = null }, actor = null) {
@@ -72,6 +74,7 @@ export const shapeHit = (h) => ({
   entryId: h.entry_id,
   queriedName: h.queried_name,
   matchedName: h.matched_name,
+  matchedOn: h.matched_on || null,
   score: Number(h.score),
   status: h.status,
   active: Boolean(Number(h.active)),
@@ -103,7 +106,7 @@ export const NEXT = {
   'eu-ownership': 'Confirmed owners listed by the EU hold 50% or more of the company, so it is subject to the EU asset freeze. Approval stays blocked.',
   'share-unknown': 'The listed owner\'s share is not given, so approval stays blocked until the share is entered.',
   'listed-person': 'Approval stays blocked.',
-  minority: 'The listed people stay below the ownership thresholds. A reviewer decides in the Sanctions Hold panel whether to proceed or block.',
+  minority: 'No ownership rule blocks the vendor automatically. Open Sanctions Hold from the work item\'s Apps button to decide whether to proceed or block.',
   pending: 'Other possible matches still wait for review.',
   review: 'Other possible matches still wait for review.',
   blocked: 'Approval stays blocked.',
@@ -194,13 +197,15 @@ export const ruleCleared = () => queueRows("h.status = 'dismissed' AND h.reviewe
 export async function importCsv(text, actor) {
   const rows = parseCsv(text).filter((r) => r.some((c) => String(c).trim()));
   if (rows.length && /^(name|vendor|legal)/i.test(String(rows[0][0]).trim())) rows.shift();
-  const list = rows.map((r) => ({ name: clean(r[0]), country: country(r[1]), owners: owners(r[2]), address: address(r[3]), regNo: regNo(r[4]) })).filter((r) => r.name);
+  const now = nowDt();
+  // An import is the list of vendors already in use, so each one counts as approved: a possible match
+  // then opens a work item in the onboarding project, now or after a later list update.
+  const list = rows.map((r) => ({ name: clean(r[0]), country: country(r[1]), owners: owners(r[2]), address: address(r[3]), regNo: regNo(r[4]), approvedAt: approvedOn(r[5], now) })).filter((r) => r.name);
   if (!list.length) throw new Error('No vendor names found. Columns: name, country, owners.');
   if (list.length > 5000) throw new Error('Up to 5,000 vendors per file.');
-  const now = nowDt();
   const ids = list.map(() => crypto.randomUUID());
   await insertMany('counterparty', ['id', 'name', 'country', 'owners', 'address', 'reg_no', 'issue_key', 'source', 'status', 'approved_at', 'created_at'],
-    list.map((r, i) => [ids[i], r.name, r.country, JSON.stringify(r.owners), r.address, r.regNo, null, 'csv', 'unscreened', null, now]));
+    list.map((r, i) => [ids[i], r.name, r.country, JSON.stringify(r.owners), r.address, r.regNo, null, 'csv', 'unscreened', r.approvedAt, now]));
   await logEvent({ type: 'counterparties_imported', detail: { count: list.length }, actor });
   return ids;
 }

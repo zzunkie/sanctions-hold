@@ -33,7 +33,7 @@ export async function validate(args) {
   if (a.reason === 'eu-ownership') return no(`${cp.name} cannot be approved. ${people}, confirmed on the EU consolidated list, ${(a.people || []).length === 1 ? 'holds' : 'hold a combined'} ${a.share}% of the company, which blocks it under the EU ownership rule.`);
   if (a.reason === 'share-unknown') return no(`${cp.name} cannot be approved. ${people} ${(a.people || []).length === 1 ? 'is' : 'are'} confirmed as listed without an ownership share; enter the share in Vendor details.`);
   if (a.reason === 'listed-person' || a.reason === 'reviewer-blocked') return no(`${cp.name} cannot be approved because of a confirmed listed owner or director: ${withShares}.`);
-  if (a.reason === 'minority') return no(`${cp.name} has a confirmed listed owner or director below the ownership thresholds: ${withShares}. Approve after a reviewer decides to proceed in the Sanctions Hold panel.`);
+  if (a.reason === 'minority') return no(`${cp.name} has a confirmed listed owner or director below the ownership thresholds: ${withShares}. Approve after a reviewer chooses Proceed in Sanctions Hold (Apps button).`);
   const n = hits.filter((h) => h.status === 'pending').length;
-  return no(`${cp.name} has ${n} possible sanctions ${plural(n, 'match', 'matches')} waiting for review (closest: ${top?.matched_name}, score ${Number(top?.score).toFixed(2)}). Approve after a reviewer decides in the Sanctions Hold panel.`);
+  return no(`${cp.name} has ${n} possible sanctions ${plural(n, 'match', 'matches')} waiting for review (closest: ${top?.matched_name}, score ${Number(top?.score).toFixed(2)}). Approve after a reviewer decides in Sanctions Hold (Apps button).`);
 }

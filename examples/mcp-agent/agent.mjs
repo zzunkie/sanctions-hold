@@ -14,7 +14,7 @@ const system = `You are a procurement assistant connected to the Sanctions Hold 
 const { tools, call } = await connect(appId, tokenDir());
 const defs = tools.map((t) => ({ name: short(t.name), description: t.description || '', input_schema: t.inputSchema || { type: 'object', properties: {} } }));
 const client = new Anthropic();
-console.log(`${bold('Agent')} with the Sanctions Hold skill, connected to mcp.atlassian.com (${defs.length} tools)`);
+console.log(`${bold('examples/mcp-agent')} with the Sanctions Hold skill, connected to mcp.atlassian.com (${defs.length} tools)`);
 console.log(`\n${bold('Request:')} ${wrap(request, 9).trimStart()}`);
 
 const messages = [{ role: 'user', content: request }];

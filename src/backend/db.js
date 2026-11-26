@@ -89,18 +89,30 @@ export const migrations = migrationRunner
       v MEDIUMTEXT
     )`)
   // Vendor-level decision after a confirmed listed minority owner or director: 'proceed' or 'block'.
-  .enqueue('v014_cp_decision', 'ALTER TABLE counterparty ADD COLUMN decision VARCHAR(16)')
-  .enqueue('v015_cp_decision_reason', 'ALTER TABLE counterparty ADD COLUMN decision_reason TEXT')
-  .enqueue('v016_cp_decision_by', 'ALTER TABLE counterparty ADD COLUMN decision_by VARCHAR(128)')
-  .enqueue('v017_cp_decision_at', 'ALTER TABLE counterparty ADD COLUMN decision_at DATETIME')
+  .enqueue('v014_cp_decision', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS decision VARCHAR(16)')
+  .enqueue('v015_cp_decision_reason', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS decision_reason TEXT')
+  .enqueue('v016_cp_decision_by', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS decision_by VARCHAR(128)')
+  .enqueue('v017_cp_decision_at', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS decision_at DATETIME')
   // The company's registered address and its registration or license number, compared with a list entry's.
-  .enqueue('v018_cp_address', 'ALTER TABLE counterparty ADD COLUMN address TEXT')
-  .enqueue('v019_cp_reg_no', 'ALTER TABLE counterparty ADD COLUMN reg_no VARCHAR(64)');
+  .enqueue('v018_cp_address', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS address TEXT')
+  .enqueue('v019_cp_reg_no', 'ALTER TABLE counterparty ADD COLUMN IF NOT EXISTS reg_no VARCHAR(64)')
+  .enqueue('v020_hit_matched_on', 'ALTER TABLE hit ADD COLUMN IF NOT EXISTS matched_on VARCHAR(128)');
 
 let migrated = false;
 export async function ensureSchema() {
   if (migrated) return;
-  await migrations.run();
+  // On a new install the first page load starts several functions at once and they run the migrations
+  // together; one that loses the race fails, and runs again after the other has recorded its steps.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await migrations.run();
+      break;
+    } catch (e) {
+      console.error('migration', attempt, e.migrationName, JSON.stringify(e.cause?.context?.debug || e.cause?.message || e.message).slice(0, 800));
+      if (attempt >= 4) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
   migrated = true;
 }
 

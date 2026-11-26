@@ -214,7 +214,14 @@ modules:
           title: Country
           type: string
           required: false
-          description: Country of registration or residence, shown with the result
+          description: Country of registration or residence; a registration number is matched
+            only to list entries of that country
+        registrationNumber:
+          title: Registration number
+          type: string
+          required: false
+          description: The company's registration, license or tax number, when known; a list
+            entry that gives it is a possible match under any name
     - key: counterparty-status
       name: Get a vendor's sanctions review status
       function: act-status

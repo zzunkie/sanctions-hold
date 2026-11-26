@@ -57,7 +57,11 @@ define('replayDesignations', async () => {
   return {};
 });
 define('rescreenAll', async () => { await queueJob('rescreen', { reason: 'manual' }); return {}; });
-define('removeSample', async () => { await removeSample(); return {}; });
+// Settings and the sample are changed only by a Jira admin, so a requester cannot loosen the screening.
+async function assertAdmin(ctx) {
+  if (!(await isJiraAdmin(ctx.accountId))) throw new Error('Only a Jira admin can change Sanctions Hold settings.');
+}
+define('removeSample', async (_, ctx) => { await assertAdmin(ctx); await removeSample(); return {}; });
 
 define('reviewQueue', async () => ({ rows: await reviewQueue(), ruleCleared: await ruleCleared() }));
 define('review', async ({ counterpartyId, entryId, decision, reason }, ctx) => {
@@ -115,13 +119,13 @@ define('listUpdates', async () => {
 define('accuracy', async () => accuracyView());
 define('runAccuracy', async () => { await queueJob('accuracy'); return {}; });
 
-define('getSettings', async () => ({
+define('getSettings', async (_, ctx) => ({
+  admin: await isJiraAdmin(ctx.accountId).catch(() => false),
   policy: await getPolicy(), projects: await getSetting('projects', []), available: await listProjects().catch(() => []),
   reviewers: await getSetting('reviewers', null), groups: await findGroups().catch(() => []),
 }));
-// Only a Jira admin chooses who decides possible matches.
 define('saveReviewers', async ({ group }, ctx) => {
-  if (!(await isJiraAdmin(ctx.accountId))) throw new Error('Only a Jira admin chooses who decides possible matches.');
+  await assertAdmin(ctx);
   const g = group?.groupId ? (await findGroups()).find((x) => x.groupId === group.groupId) : null;
   if (group?.groupId && !g) throw new Error('That Jira group was not found.');
   await setSetting('reviewers', g);
@@ -129,6 +133,7 @@ define('saveReviewers', async ({ group }, ctx) => {
   return { reviewers: g };
 });
 define('saveSettings', async ({ threshold, projects, ownerRule, birthYearRule }, ctx) => {
+  await assertAdmin(ctx);
   const t = Number(threshold);
   if (!(t >= 0.85 && t <= 0.98)) throw new Error('The threshold must be between 0.85 and 0.98.');
   const before = await getPolicy();

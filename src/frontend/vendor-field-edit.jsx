@@ -13,8 +13,8 @@ const roleBox = xcss({ width: '130px' });
 const bornBox = xcss({ width: '150px' });
 const affix = xcss({ paddingInline: 'space.100' });
 const natBox = xcss({ width: '220px' });
-const addressBox = xcss({ width: '360px' });
-const regBox = xcss({ width: '200px' });
+const addressBox = xcss({ width: '480px', maxWidth: '100%' });
+const regBox = xcss({ width: '240px', maxWidth: '100%' });
 const YEAR = /^\d{4}(-\d{2}-\d{2})?$/;
 
 // Keeps only rows with a name; a share is kept for owners and must be between 0 and 100; a year
