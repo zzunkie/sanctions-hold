@@ -279,8 +279,8 @@ function ReviewQueue({ onChange, stamp }) {
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
-            // A vendor with several possible matches is named in full on its first row; the rows after it say it is the same vendor.
-            { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? <Text color="color.text.subtle">{`Same vendor${h.counterparty.issueKey ? ` (${h.counterparty.issueKey})` : ''}`}</Text> : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
+            // A vendor with several possible matches is named in full on its first row; the rows after it repeat the name in a lighter colour.
+            { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? <Text color="color.text.subtle">{h.counterparty.name}</Text> : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
             { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
@@ -420,7 +420,8 @@ function Vendors({ onChange, stamp }) {
     <Stack space="space.300">
       <Text color="color.text.subtle">Every vendor Sanctions Hold screens: from onboarding work items, the Rovo agent, MCP clients and CSV imports. All of them are screened again after each list update.</Text>
       <Heading size="small">Import the vendors you already work with</Heading>
-      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened now and after every list update, and a possible match opens a work item in the onboarding project.</Text>
+      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60% born 1963 nationality Iran; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened right away, and a possible match opens a work item in the onboarding project.</Text>
+      <Link href="https://github.com/zzunkie/sanctions-hold/blob/main/examples/current-vendors.csv" openNewTab>Example CSV file (six suppliers)</Link>
       <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
       {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
       <Heading size="small">All vendors</Heading>
