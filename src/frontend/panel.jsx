@@ -66,6 +66,11 @@ function Panel() {
   const note = view?.assessment?.reason === 'dismissed' && byRule
     ? 'Every possible match was dismissed by a reviewer or cleared by the year-of-birth rule. The vendor can be approved.'
     : STATUS_NOTE[view?.assessment?.reason];
+  // Reviewers decide in the panel in the main column, which the app opens on each held work item.
+  const pending = open.filter((h) => h.status === 'pending').length;
+  const who = access && !access.allowed ? ` (members of the Jira group ${access.group})` : '';
+  // A listed minority owner or director has its own note below, from OwnershipNote.
+  const toDecide = pending ? `${pending} possible ${pending === 1 ? 'match' : 'matches'} to decide in the Sanctions Hold panel${who}.` : null;
   return (
     <Stack space="space.200">
       {error ? <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage> : null}
@@ -76,27 +81,27 @@ function Panel() {
           {compact
             ? <Stack space="space.050"><Inline><StatusLozenge status={cp.status} /></Inline><Text weight="medium">{cp.name}</Text></Stack>
             : <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>}
-          <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
-          {note ? <Text>{note}</Text> : null}
+          <Text color="color.text.subtle">{compact
+            ? [countryName(cp.country) || 'No country', cp.registrationNumber ? `registration ${cp.registrationNumber}` : null, cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'].filter(Boolean).join(' · ')
+            : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
+          {/* The sidebar is a summary: the status, the vendor's details and one line on what is left to decide. The panel explains. */}
+          {compact ? (toDecide ? <Text>{toDecide}</Text> : null) : note ? <Text>{note}</Text> : null}
           <OwnershipNote view={view} onDone={changed} compact={compact} />
+          {/* Keyed by the order and status of the matches, so a decision that reorders them draws the list afresh. */}
+          <Stack key={open.map((h) => `${h.entryId}:${h.status}`).join('|')} space="space.150">
           {open.map((h) => {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
-                <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? (h.reviewedBy === 'rule:birth-year' ? 'Cleared match' : 'Dismissed match') : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : h.matchedOn ? 'the registration number' : 'the company name'}`}</Heading>
-                {h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
+                {compact ? null : <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? (h.reviewedBy === 'rule:birth-year' ? 'Cleared match' : 'Dismissed match') : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : h.matchedOn ? 'the registration number' : 'the company name'}`}</Heading>}
+                {h.status !== 'pending' && (compact || h.reviewedBy !== 'rule:birth-year') ? <Inline><HitLozenge status={h.status} reviewedBy={h.reviewedBy} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} compact={compact} />
                 {compact ? null : <ReviewedNote hit={h} onReopen={changed} />}
                 {h.status === 'pending' && !compact ? <ReviewForm hit={h} cp={cp} onDone={changed} /> : null}
               </Stack>
             );
           })}
-          {/* The sidebar is a summary; reviewers decide in the panel in the main column, which the app opens on each held work item. */}
-          {compact && (open.some((h) => h.status === 'pending') || view?.assessment?.reason === 'minority')
-            ? <Text color="color.text.subtle">{access && !access.allowed
-              ? `Members of the Jira group ${access.group} decide in the Sanctions Hold panel on the left.`
-              : 'Decide in the Sanctions Hold panel on the left.'}</Text>
-            : null}
+          </Stack>
           {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (

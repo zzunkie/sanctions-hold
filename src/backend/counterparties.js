@@ -59,7 +59,9 @@ export async function counterpartyView(id) {
   if (!cp) return null;
   const hits = await q(`SELECT h.*, e.list, e.ent_num, e.name AS entry_name, e.kind, e.programs, e.countries, e.title, e.remarks, e.aliases, e.addresses, e.active AS entry_active
                         FROM hit h LEFT JOIN list_entry e ON e.entry_id = h.entry_id WHERE h.counterparty_id = ? ORDER BY h.score DESC`, id);
-  const events = await q('SELECT at, type, entry_id, detail, actor FROM event_log WHERE counterparty_id = ? ORDER BY at DESC LIMIT 50', id);
+  const events = (await q('SELECT at, type, entry_id, detail, actor FROM event_log WHERE counterparty_id = ? ORDER BY at DESC LIMIT 50', id))
+    // A match on an owner or director is about a person; the activity labels say so.
+    .map((e) => ({ ...e, person: hits.some((h) => h.entry_id === e.entry_id && h.queried_name && h.queried_name !== cp.name) ? 1 : 0 }));
   const { status, ...assessment } = assess(hits, cp, await policy());
   return {
     counterparty: shapeCp(cp),

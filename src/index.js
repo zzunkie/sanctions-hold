@@ -32,7 +32,10 @@ const JOBS = ['import', 'rescreen', 'start-demo', 'accuracy'];
 define('overview', async () => {
   const [c, list, check, setup, onboarding, queue, recent] = await Promise.all([
     counts(), listState(), getSetting('listCheck', null), setupStatus(), getSetting('onboarding', null), reviewQueue(),
-    q(`SELECT l.at, l.type, COALESCE(l.issue_key, c.issue_key) AS issue_key, l.entry_id, l.detail, l.actor, c.name FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
+    q(`SELECT l.at, l.type, COALESCE(l.issue_key, c.issue_key) AS issue_key, l.entry_id, l.detail, l.actor, c.name,
+         (h.queried_name IS NOT NULL AND h.queried_name <> c.name) AS person
+       FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
+         LEFT JOIN hit h ON h.counterparty_id = l.counterparty_id AND h.entry_id = l.entry_id
        WHERE l.type IN ('match_found', 'match_reopened', 'match_dismissed', 'match_confirmed', 'approval_blocked', 'approved', 'list_updated', 'rescreen_all', 'screened_by_tool', 'review_note_added')
           OR (l.type = 'counterparty_added' AND (l.detail LIKE '%"source":"mcp"%' OR l.detail LIKE '%"source":"rovo"%'))
        ORDER BY l.at DESC LIMIT 15`),

@@ -36,7 +36,7 @@ export function screenNames(index, names, threshold) {
 // entry, or else one of the entry's countries.
 export function registrationHits(cache, found, { name, registrationNumber, country }) {
   const key = normId(registrationNumber);
-  if (!cache?.ids || key.length < MIN_ID) return found;
+  if (!cache?.ids || key.length < MIN_ID) return withoutDuplicates(found);
   const places = country ? countrySpellings(country).concat(String(country).toLowerCase()) : null;
   for (const x of cache.ids.get(key) || []) {
     const e = cache.index.byEntry.get(x.entryId);
@@ -45,6 +45,15 @@ export function registrationHits(cache, found, { name, registrationNumber, count
     if (places && where && !places.some((p) => where.includes(p))) continue;
     if (found.has(x.entryId)) continue;
     found.set(x.entryId, { score: 1, matchedName: e.name, queriedName: name, entryHash: e.hash, matchedOn: `${x.label} ${x.value}`.slice(0, 128) });
+  }
+  return withoutDuplicates(found);
+}
+
+// OFAC publishes some entries on both the SDN List and the Consolidated List under the same number and with
+// the same details; such an entry is one possible match, kept as the SDN entry.
+function withoutDuplicates(found) {
+  for (const id of [...found.keys()]) {
+    if (id.startsWith('CONS:') && found.has(`SDN:${id.slice(5)}`)) found.delete(id);
   }
   return found;
 }
@@ -218,7 +227,7 @@ async function openPaymentHold(cp, lines, cause) {
   if (!p?.key) return null;
   const type = await taskType(p.key);
   if (!type) return null;
-  const issue = await createIssue({
+  const fields = {
     project: { key: p.key },
     issuetype: { id: type.id },
     summary: `Hold payments to ${cp.name}`.slice(0, 250),
@@ -226,7 +235,16 @@ async function openPaymentHold(cp, lines, cause) {
       `Sanctions Hold: ${cause} found a possible match for ${cp.name}, an approved vendor. Hold payments to this vendor until the match is reviewed on ${cp.issue_key}.`,
       ...lines,
     ),
-  });
+  };
+  // Assigned to the project lead, so the hold reaches someone in accounts payable; unassigned if Jira refuses.
+  const lead = await jira(route`/rest/api/3/project/${p.key}`).then((r) => r?.lead?.accountId || null).catch(() => null);
+  let issue;
+  try {
+    issue = await createIssue(lead ? { ...fields, assignee: { accountId: lead } } : fields);
+  } catch (e) {
+    if (!lead || e.status !== 400) throw e;
+    issue = await createIssue(fields);
+  }
   await linkIssues(issue.key, cp.issue_key).catch((e) => console.error('link', issue.key, e.message));
   await logEvent({ type: 'payment_hold_opened', counterpartyId: cp.id, issueKey: cp.issue_key, detail: { workItem: issue.key, project: p.key } });
   return issue.key;

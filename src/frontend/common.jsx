@@ -103,7 +103,7 @@ export function placesOfHit(hit, cp) {
 }
 
 // The evidence a reviewer needs, side by side: what the vendor gave and what the list entry says.
-// In the narrow sidebar (compact) a match is two lines: the entry, then its list and what agrees or differs.
+// In the narrow sidebar (compact) a match is two lines: the entry, then who it was found for, its list and what agrees or differs.
 export function MatchEvidence({ hit, cp, compact = false }) {
   const [showRemarks, setShowRemarks] = useState(false);
   const e = hit.entry;
@@ -125,7 +125,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
     return (
       <Stack space="space.050">
         <Text weight="medium">{matchedText(hit)}</Text>
-        <Text color="color.text.subtle">{[`${listName(e.list)}${e.onList ? '' : ' (since removed)'}`, hit.matchedOn ? 'found by the registration number' : `score ${score(hit.score)}`, ...cmp.filter(Boolean)].join(' · ')}</Text>
+        <Text color="color.text.subtle">{[owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : hit.matchedOn ? 'found by the registration number' : 'company name', `${listName(e.list)}${e.onList ? '' : ' (since removed)'}`, hit.matchedOn ? null : `score ${score(hit.score)}`, ...cmp.filter(Boolean)].filter(Boolean).join(' · ')}</Text>
       </Stack>
     );
   }

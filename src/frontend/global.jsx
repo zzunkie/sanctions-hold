@@ -145,6 +145,9 @@ const eventLabel = (e) => {
   if (via && e.type === 'counterparty_added') return `Request opened by ${via}`;
   if (via && e.type === 'review_note_added') return `Review notes by ${via}`;
   if (e.type === 'match_dismissed' && e.actor === 'rule:birth-year') return 'Cleared by the year-of-birth rule';
+  // A match on an owner or director is about a person.
+  if (Number(e.person) && e.type === 'match_dismissed') return 'Marked not the same person';
+  if (Number(e.person) && e.type === 'match_confirmed') return 'Confirmed as the same person';
   if (e.type === 'match_reopened' && byRuleOff(e)) return 'Reopened: no longer cleared by the year-of-birth rule';
   if (e.type === 'match_reopened' && e.detail?.from) return 'Decision reopened for review';
   return EVENT_TEXT[e.type] || e.type;
@@ -276,8 +279,8 @@ function ReviewQueue({ onChange, stamp }) {
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
-            // A vendor with several possible matches is named once, on its first row.
-            { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? '' : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
+            // A vendor with several possible matches is named in full on its first row; the rows after it say it is the same vendor.
+            { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? <Text color="color.text.subtle">{`Same vendor${h.counterparty.issueKey ? ` (${h.counterparty.issueKey})` : ''}`}</Text> : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
             { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
@@ -345,7 +348,7 @@ function History({ events }) {
   return (
     <DynamicTable
       head={{ cells: [{ key: 't', content: 'Time (UTC)' }, { key: 'e', content: 'Event' }, { key: 'd', content: 'Detail' }] }}
-      rows={events.slice(0, 15).map((e, i) => ({ key: `${e.at}-${i}`, cells: [{ key: 't', content: fmtTime(e.at) }, { key: 'e', content: EVENT_TEXT[e.type] || e.type.replace(/_/g, ' ') }, { key: 'd', content: eventDetail(e) }] }))}
+      rows={events.slice(0, 15).map((e, i) => ({ key: `${e.at}-${i}`, cells: [{ key: 't', content: fmtTime(e.at) }, { key: 'e', content: EVENT_TEXT[e.type] ? eventLabel(e) : e.type.replace(/_/g, ' ') }, { key: 'd', content: eventDetail(e) }] }))}
     />
   );
 }
@@ -565,7 +568,7 @@ function Accuracy({ onStarted, finishedAt }) {
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
       <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
       <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries find their entry when searched with the country given for each. None of 10,809 GLEIF companies searched by registration number (1,846 in Russia, 8,963 in 16 other countries and territories) matched another company's entry.</Text>
-      <Text color="color.text.subtle">Year-of-birth rule (measured offline 2026-11-26): for names on two of the lists under the same primary name, 97 of 6,925 checks find birth years more than a year apart, from namesakes or from the lists disagreeing, so the rule is off by default.</Text>
+      <Text color="color.text.subtle">Year-of-birth rule (measured offline 2026-11-26): across person entries that share a primary name on two lists, checking one entry's year of birth against the other keeps 6,828 of 6,925 checks in review (98.6%).</Text>
       <Inline space="space.100"><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button>
         <Button appearance="subtle" onClick={() => setMethod(!method)}>{method ? 'Hide sampling details and flagged names' : 'Sampling details and flagged names'}</Button></Inline>
       {method ? (
