@@ -295,11 +295,22 @@ async function moveTo(issueKey, statusName) {
 export const moveToReview = (issueKey) => moveTo(issueKey, 'Sanctions review');
 
 // When the review that a payment hold waits on ends, the hold's open work items say how it ended.
+// When a reviewer reopens the review of a cleared vendor, its closed holds open again.
 export async function updatePaymentHolds(cp, from, to) {
-  if (!cp.issue_key || from !== 'review' || !['cleared', 'blocked'].includes(to)) return;
+  const reopened = from === 'cleared' && to === 'review';
+  if (!cp.issue_key || !(reopened || (from === 'review' && ['cleared', 'blocked'].includes(to)))) return;
   const issue = await jira(route`/rest/api/3/issue/${cp.issue_key}?fields=issuelinks`);
-  const holds = (issue?.fields?.issuelinks || []).map((l) => l.inwardIssue || l.outwardIssue)
-    .filter((i) => i?.fields?.summary?.startsWith('Hold payments to ') && i.fields.status?.statusCategory?.key !== 'done');
+  const linked = (issue?.fields?.issuelinks || []).map((l) => l.inwardIssue || l.outwardIssue)
+    .filter((i) => i?.fields?.summary?.startsWith('Hold payments to '));
+  if (reopened) {
+    for (const h of linked.filter((i) => i.fields.status?.statusCategory?.key === 'done')) {
+      await reopenWorkItem(h.key).catch((e) => console.error('hold reopen', h.key, e.message));
+      await comment(h.key, `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} was reopened. Hold payments to this vendor again until the review is complete.`)
+        .catch((e) => console.error('hold update', h.key, e.message));
+    }
+    return;
+  }
+  const holds = linked.filter((i) => i.fields.status?.statusCategory?.key !== 'done');
   const text = to === 'cleared'
     ? `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is cleared. Payments to this vendor can resume.`
     : `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is blocked. Keep payments to this vendor on hold.`;
@@ -308,6 +319,13 @@ export async function updatePaymentHolds(cp, from, to) {
     // A cleared vendor's hold is done; a blocked vendor's stays open.
     if (to === 'cleared') await closeWorkItem(h.key).catch((e) => console.error('hold close', h.key, e.message));
   }
+}
+
+async function reopenWorkItem(key) {
+  const res = await jira(route`/rest/api/3/issue/${key}/transitions`);
+  const list = res?.transitions || [];
+  const open = list.find((t) => t.to?.statusCategory?.key === 'new') || list.find((t) => t.to?.statusCategory?.key === 'indeterminate');
+  if (open) await jira(route`/rest/api/3/issue/${key}/transitions`, 'POST', { transition: { id: open.id } });
 }
 
 async function closeWorkItem(key) {
