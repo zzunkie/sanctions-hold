@@ -90,7 +90,7 @@ function JiraSetup({ setup, onDone }) {
       actions={[<SectionMessageAction key="go" onClick={start}>{state?.state === 'error' ? 'Try again' : 'Create the project'}</SectionMessageAction>]}
     >
       {state?.state === 'error' ? <Text>{state.error}</Text> : null}
-      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or is blocked by a confirmed match. With the sample vendors loaded, it also adds ten onboarding requests, and moves the ones with a possible match to Sanctions review. To use your own workflow instead, see Settings.</Text>
+      <Text>Creates a company-managed project "Vendor onboarding" whose Approve transition is blocked while a vendor has a possible sanctions match waiting for review or is blocked by a confirmed match. With the sample vendors loaded, it also adds ten onboarding requests, and moves the ones with a possible match to Sanctions review. It also creates an "Accounts payable" project for payment holds, unless Settings already names one. To use your own workflow instead, see Settings.</Text>
     </SectionMessage>
   );
 }
@@ -146,6 +146,7 @@ const eventLabel = (e) => {
   if (via && e.type === 'review_note_added') return `Review notes by ${via}`;
   if (e.type === 'match_dismissed' && e.actor === 'rule:birth-year') return 'Cleared by the year-of-birth rule';
   if (e.type === 'match_reopened' && byRuleOff(e)) return 'Reopened: no longer cleared by the year-of-birth rule';
+  if (e.type === 'match_reopened' && e.detail?.from) return 'Decision reopened for review';
   return EVENT_TEXT[e.type] || e.type;
 };
 
@@ -179,7 +180,7 @@ function Overview({ data, reload, goReview }) {
         <Stat label="Blocked" value={c.blocked} />
         <Stat label="Cleared after review" value={c.cleared} />
         <Stat label="No match" value={c.clear} />
-        <Stat label="Approved vendors now in review" value={c.approvedInReview} />
+        <Stat label="Approved vendors in review or blocked" value={c.approvedInReview} />
       </Inline>
       {held ? (
         <SectionMessage appearance="information" title="Sample: the newest designations are held back" actions={[<SectionMessageAction key="r" onClick={replay}>{busy ? 'Starting…' : 'Replay them as a list update'}</SectionMessageAction>]}>
@@ -641,7 +642,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Payment holds</Heading>
-        <Text color="color.text.subtle">With a project chosen, when a list update, an import or a change in these settings finds a possible match for an approved vendor, the app also opens a work item "Hold payments to …" in that project, linked to the vendor's work item, so the payments team can hold payments until the match is decided.</Text>
+        <Text color="color.text.subtle">With a project chosen, when a list update, an import or a change in these settings finds a possible match for an approved vendor, the app also opens a work item "Hold payments to …" in that project, linked to the vendor's work item, so the payments team can hold payments until the match is decided. When the reviewer clears the vendor, the app comments that payments can resume and moves the hold to Done; when the vendor is blocked, it comments that payments stay on hold and leaves the hold open.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="payment-holds" isDisabled={off} value={data.paymentHolds ? { label: `${data.paymentHolds.name} (${data.paymentHolds.key})`, value: data.paymentHolds.key } : noHolds} options={holdOptions} onChange={(o) => o && savePaymentHolds(o.value)} /></Box>
       </Stack>
       <Stack space="space.100">

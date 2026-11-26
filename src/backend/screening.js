@@ -285,7 +285,17 @@ export async function updatePaymentHolds(cp, from, to) {
   const text = to === 'cleared'
     ? `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is cleared. Payments to this vendor can resume.`
     : `Sanctions Hold: the review of ${cp.name} on ${cp.issue_key} is complete and the vendor is blocked. Keep payments to this vendor on hold.`;
-  for (const h of holds) await comment(h.key, text).catch((e) => console.error('hold update', h.key, e.message));
+  for (const h of holds) {
+    await comment(h.key, text).catch((e) => console.error('hold update', h.key, e.message));
+    // A cleared vendor's hold is done; a blocked vendor's stays open.
+    if (to === 'cleared') await closeWorkItem(h.key).catch((e) => console.error('hold close', h.key, e.message));
+  }
+}
+
+async function closeWorkItem(key) {
+  const res = await jira(route`/rest/api/3/issue/${key}/transitions`);
+  const done = (res?.transitions || []).find((t) => t.to?.statusCategory?.key === 'done');
+  if (done) await jira(route`/rest/api/3/issue/${key}/transitions`, 'POST', { transition: { id: done.id } });
 }
 
 // Keep the work item's status in step with the vendor's: Blocked while a confirmed match blocks it,

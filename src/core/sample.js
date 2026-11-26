@@ -18,10 +18,10 @@ const COUNTRY = [
   ['SG', 'Pte. Ltd.'], ['CA', 'Inc.'], ['JP', 'K.K.'], ['KR', 'Co., Ltd.'], ['MX', 'S.A. de C.V.'], ['AE', 'FZE'],
   ['IE', 'Ltd'], ['US', 'Corp.'],
 ];
-const OWNERS = [
-  'Laura Whitfield', 'Martin Keller', 'Priya Raman', 'Tomas Lindqvist', 'Hannah Okafor', 'Daniel Moreau',
-  'Grace Thornton', 'Kenji Watanabe', 'Sofia Brandt', 'Owen Gallagher', 'Ines Duarte', 'Lucas Fournier',
-];
+// Owner names for the ordinary vendors: 12 given names and 13 surnames, so each combination is used once.
+const GIVEN = ['Laura', 'Martin', 'Priya', 'Tomas', 'Hannah', 'Daniel', 'Grace', 'Kenji', 'Sofia', 'Owen', 'Ines', 'Lucas'];
+const SURNAME = ['Whitfield', 'Keller', 'Raman', 'Lindqvist', 'Okafor', 'Moreau', 'Thornton', 'Watanabe', 'Brandt', 'Gallagher', 'Duarte', 'Fournier', 'Castellano'];
+const ownerName = (k) => `${GIVEN[k % GIVEN.length]} ${SURNAME[(k + 1) % SURNAME.length]}`;
 
 // Countries are ISO 3166 alpha-2 codes; list entries carry country names.
 export const COUNTRY_NAMES = {
@@ -46,7 +46,7 @@ export function ordinaryVendors(n = 190, now = Date.now()) {
       key: `v${String(out.length + 1).padStart(3, '0')}`,
       name,
       country,
-      owners: i % 4 === 0 ? [`${OWNERS[(i / 4) % OWNERS.length]} (100%)`] : [],
+      owners: i % 4 === 0 ? [`${ownerName(i / 4)} (100%)`] : [],
       approvedAt: i % 6 === 5 ? null : new Date(now - (10 + ((i * 37) % 300)) * DAY).toISOString(),
     });
   }

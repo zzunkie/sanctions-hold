@@ -182,7 +182,14 @@ export async function runSetup({ accountId }) {
     await setSetting('projects', [...projects]);
     await step('Creating sample onboarding requests');
     const samples = await sampleRequests(project);
-    await logEvent({ type: 'jira_setup', detail: { project: project.projectKey, samples, field: state.field }, actor: accountId });
+    // A project for accounts payable, where an approved vendor that a list update or an import matches gets a payment hold.
+    if (!(await getSetting('paymentHolds', null))) {
+      await step('Creating the Accounts payable project for payment holds');
+      const ap = await createProject('AP', 'Accounts payable', 'Sanctions Hold opens a work item here to hold payments to an approved vendor that a list update or an import matches.', accountId)
+        .catch((e) => { console.error('payments project', e.message); return null; });
+      if (ap) await setSetting('paymentHolds', { key: ap.projectKey, name: ap.projectKey === 'AP' ? 'Accounts payable' : `Accounts payable ${ap.projectKey.slice(2)}` });
+    }
+    await logEvent({ type: 'jira_setup', detail: { project: project.projectKey, samples, field: state.field, paymentHolds: (await getSetting('paymentHolds', null))?.key || null }, actor: accountId });
     Object.assign(state, { state: 'done', project: project.projectKey, samples, finishedAt: new Date().toISOString() });
     await setSetting('setup', state);
   } catch (e) {
