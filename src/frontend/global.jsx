@@ -420,7 +420,7 @@ function Vendors({ onChange, stamp }) {
     <Stack space="space.300">
       <Text color="color.text.subtle">Every vendor Sanctions Hold screens: from onboarding work items, the Rovo agent, MCP clients and CSV imports. All of them are screened again after each list update.</Text>
       <Heading size="small">Import the vendors you already work with</Heading>
-      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60% born 1963 nationality Iran; Sara Haddad director"), plus optional registered address, registration or license number, and approval date (YYYY-MM-DD). Imported vendors are screened right away, and a possible match opens a work item in the onboarding project.</Text>
+      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by semicolons (for example "Ali Kalhor 60% born 1963 nationality Iran; Sara Haddad director"), registered address, registration or license number, and approval date (YYYY-MM-DD). Only the name is required. Imported vendors count as approved and are screened on import; a possible match opens a work item in the onboarding project and a payment hold in the payments project.</Text>
       <Link href="https://github.com/zzunkie/sanctions-hold/blob/main/examples/current-vendors.csv" openNewTab>Example CSV file (six suppliers)</Link>
       <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
       {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
