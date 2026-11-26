@@ -241,7 +241,7 @@ export async function counts() {
   for (const r of rows) {
     out[r.status] = Number(r.n);
     out.total += Number(r.n);
-    if (r.status === 'review' || r.status === 'blocked') out.approvedInReview += Number(r.approved);
+    if (r.status === 'review') out.approvedInReview += Number(r.approved);
   }
   return out;
 }

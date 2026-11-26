@@ -49,8 +49,16 @@ for (let turn = 0; turn < 12; turn += 1) {
   for (const u of uses) {
     console.log(`\n${cyan(bold(`> ${u.name}`))}`);
     for (const [k, v] of Object.entries(u.input || {})) {
-      const flat = String(v).replace(/\s*\n\s*/g, ' / ');
-      console.log(dim(wrap(`${k}: ${flat.length > 160 ? `${flat.slice(0, 157)}...` : flat}`, 2)));
+      // Multi-line arguments such as review notes: the first three lines as written, then how many follow.
+      const lines = String(v).split('\n').filter((l) => l.trim());
+      if (lines.length > 1) {
+        console.log(dim(`  ${k}:`));
+        for (const l of lines.slice(0, 3)) console.log(dim(wrap(l.trim(), 4)));
+        if (lines.length > 3) console.log(dim(`    … ${lines.length - 3} more lines`));
+      } else {
+        const flat = String(v);
+        console.log(dim(wrap(`${k}: ${flat.length > 160 ? `${flat.slice(0, 157)}...` : flat}`, 2)));
+      }
     }
     const res = await call(u.name, u.input || {});
     console.log(wrap(res?.answer || JSON.stringify(res).slice(0, 300), 2));

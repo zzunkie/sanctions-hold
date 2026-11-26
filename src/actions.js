@@ -162,7 +162,11 @@ export async function listChanges(payload) {
   const days = Math.min(90, Math.max(1, Number(payload?.days) || 7));
   const since = dt(Date.now() - days * 864e5);
   const versions = await q('SELECT id, published, fetched_at, entries, added, removed, changed, note FROM list_version WHERE fetched_at >= ? ORDER BY fetched_at DESC', since);
-  const changes = await q('SELECT change_type, entry_id, name, programs FROM list_change WHERE at >= ? ORDER BY at DESC LIMIT 200', since);
+  // Up to 50 added and 50 removed entries, listed apart so that a large number of changed entries does not crowd them out.
+  const changes = [
+    ...await q("SELECT change_type, entry_id, name, programs FROM list_change WHERE at >= ? AND change_type = 'added' ORDER BY at DESC LIMIT 50", since),
+    ...await q("SELECT change_type, entry_id, name, programs FROM list_change WHERE at >= ? AND change_type = 'removed' ORDER BY at DESC LIMIT 50", since),
+  ];
   const matched = await q(`SELECT c.name, c.issue_key, c.status, c.approved_at, h.matched_name, h.score, h.entry_id FROM hit h JOIN counterparty c ON c.id = h.counterparty_id
                            WHERE h.found_at >= ? AND h.status = 'pending' AND h.active = 1
                              AND h.entry_id IN (SELECT entry_id FROM list_change WHERE at >= ? AND change_type IN ('added', 'changed'))
