@@ -180,7 +180,7 @@ function Overview({ data, reload, goReview }) {
         <Stat label="Blocked" value={c.blocked} />
         <Stat label="Cleared after review" value={c.cleared} />
         <Stat label="No match" value={c.clear} />
-        <Stat label="Approved vendors back in review" value={c.approvedInReview} />
+        <Stat label="Approved vendors now in review" value={c.approvedInReview} />
       </Inline>
       {held ? (
         <SectionMessage appearance="information" title="Sample: the newest designations are held back" actions={[<SectionMessageAction key="r" onClick={replay}>{busy ? 'Starting…' : 'Replay them as a list update'}</SectionMessageAction>]}>
