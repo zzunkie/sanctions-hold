@@ -106,7 +106,7 @@ export const NEXT = {
   'eu-ownership': 'Confirmed owners listed by the EU hold 50% or more of the company, so it is subject to the EU asset freeze. Approval stays blocked.',
   'share-unknown': 'The listed owner\'s share is not given, so approval stays blocked until the share is entered.',
   'listed-person': 'Approval stays blocked.',
-  minority: 'No ownership rule blocks the vendor automatically. Open Sanctions Hold from View app actions, under the work item\'s title, to decide whether to proceed or block.',
+  minority: 'No ownership rule blocks the vendor automatically. Decide whether to proceed or block in the Sanctions Hold panel on this work item.',
   pending: 'Other possible matches still wait for review.',
   review: 'Other possible matches still wait for review.',
   blocked: 'Approval stays blocked.',
@@ -159,8 +159,10 @@ export async function reviewMatch({ counterpartyId, entryId, decision, reason },
     ...(status !== cp.status ? [{ counterpartyId, issueKey: cp.issue_key, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: cp.screened_version }, actor: accountId }] : []),
   ]);
   if (cp.issue_key && decision !== 'pending') {
-    const verb = decision === 'dismissed' ? 'not the same party' : 'confirmed as the same party';
-    await comment(cp.issue_key, [`Sanctions Hold: possible match ${h.matched_name} (${entryId}) marked ${verb} by `, { mention: accountId }, '.'], `Reason: ${why}`, NEXT[why2] || NEXT[status])
+    // An owner or director was screened under their own name; the company under the vendor's.
+    const who = h.queried_name && h.queried_name !== cp.name ? 'person' : 'party';
+    const verb = decision === 'dismissed' ? `marked not the same ${who}` : `confirmed as the same ${who}`;
+    await comment(cp.issue_key, [`Sanctions Hold: possible match ${h.matched_name} (${entryId}) ${verb} by `, { mention: accountId }, '.'], `Reason: ${why}`, NEXT[why2] || NEXT[status])
       .catch((e) => console.error('comment', e.message));
     if (status !== 'review') await removeLabel(cp.issue_key, 'sanctions-review').catch(() => null);
   }

@@ -7,7 +7,7 @@ import { MIN_ID } from './screen-index.js';
 import { q, marks, insertMany, logEvents, getSetting, nowDt } from './db.js';
 import { loadIndex } from './screen-index.js';
 import { route } from '@forge/api';
-import { jira, comment, addLabel, createIssue, setProperty, adf } from './jira.js';
+import { jira, comment, addLabel, createIssue, setProperty, showPanel, adf } from './jira.js';
 import { setVendorField } from './vendor-field.js';
 
 export const DEFAULT_POLICY = { threshold: 0.92, ownerRule: 'fifty', birthYearRule: false };
@@ -228,7 +228,7 @@ async function notifyApprovedMatch({ cp, opened }, cache, reason) {
       ? `Sanctions Hold: screening this imported vendor against the lists updated OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''} found a possible match.`
       : `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
     ...lines,
-    `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Open Sanctions Hold from View app actions, under the work item's title, to review the match.`,
+    `The vendor is ${imported ? 'in' : 'back in'} the review queue and this work item has moved to Sanctions review. Review the match in the Sanctions Hold panel.`,
   );
   await addLabel(cp.issue_key, 'sanctions-review');
   await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));
@@ -241,6 +241,7 @@ async function moveTo(issueKey, statusName) {
   const t = await jira(route`/rest/api/3/issue/${issueKey}/transitions`);
   const tr = (t.transitions || []).find((x) => x.to?.name === statusName);
   if (tr) await jira(route`/rest/api/3/issue/${issueKey}/transitions`, 'POST', { transition: { id: tr.id } });
+  await showPanel(issueKey).catch((e) => console.error('panel', issueKey, e.message));
 }
 
 // Move a work item to the "Sanctions review" status, where Approve runs the check again.

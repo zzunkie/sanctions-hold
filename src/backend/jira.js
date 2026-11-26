@@ -1,5 +1,5 @@
 // Jira REST helpers (as the app).
-import api, { route } from '@forge/api';
+import api, { route, assumeTrustedRoute, getAppContext } from '@forge/api';
 
 export async function jira(path, method = 'GET', body) {
   const res = await api.asApp().requestJira(path, {
@@ -26,6 +26,18 @@ export async function createIssue(fields) {
     if (e.status !== 400 || !/priority/i.test(e.message)) throw e;
     return jira(route`/rest/api/3/issue`, 'POST', { fields });
   }
+}
+
+// Opens the wider Sanctions Hold panel on a work item, the way Jira records a panel added from
+// View app actions. A work item that already has the panel, or where someone removed it, is left alone.
+export async function showPanel(issueKey) {
+  const { appAri, environmentAri } = getAppContext();
+  const key = `ari:cloud:ecosystem::extension/${appAri.appId}/${environmentAri.environmentId}/static/sanctions-hold-panel`;
+  // The key holds slashes, which route`` refuses; both parts are encoded here.
+  const path = assumeTrustedRoute(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/properties/${encodeURIComponent(key)}`);
+  const res = await api.asApp().requestJira(path, { headers: { Accept: 'application/json' } });
+  if (res.ok) return;
+  await jira(path, 'PUT', [{ added: Date.now(), id: Math.random().toString(16).slice(2, 10), collapsed: false }]);
 }
 
 export async function setProperty(issueKey, key, value) {

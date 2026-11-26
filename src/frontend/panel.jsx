@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, { Stack, Inline, Text, Button, Textfield, Label, Spinner, SectionMessage, Heading, useProductContext } from '@forge/react';
+import { events } from '@forge/bridge';
 import { call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, fmtTime, fmtVersion, countryName, listDates, useReviewAccess } from './common.jsx';
 import { formatOwner } from '../core/owners.js';
 
@@ -28,6 +29,13 @@ function Panel() {
     setForm(cp ? { name: cp.name, country: cp.country || '', address: cp.address || '', registrationNumber: cp.registrationNumber || '', owners: cp.owners.join('; ') } : { name: r.suggestion?.name || '', country: r.suggestion?.country || '', address: '', registrationNumber: '', owners: (r.suggestion?.owners || []).join('; ') });
   }, (e) => setError(e.message));
   useEffect(() => { if (issueKey) load(); }, [issueKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The sidebar and the wider panel are separate frames; a decision or edit in one reloads the other.
+  useEffect(() => {
+    if (!issueKey) return undefined;
+    const sub = events.on('sanctions-hold-changed', (p) => { if (!p || p.issueKey === issueKey) load(); });
+    return () => { sub.then((s) => s.unsubscribe()).catch(() => null); };
+  }, [issueKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changed = () => { load(); events.emit('sanctions-hold-changed', { issueKey }).catch(() => null); };
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -35,6 +43,7 @@ function Panel() {
       const r = await call('issueSetVendor', { issueKey, name: form.name, country: form.country, address: form.address, registrationNumber: form.registrationNumber, owners: form.owners.split(';').map((s) => s.trim()).filter(Boolean) });
       setData((d) => ({ ...d, view: r.view }));
       setEditing(false);
+      events.emit('sanctions-hold-changed', { issueKey }).catch(() => null);
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
   if (data === undefined && !error) return <Spinner label="Loading sanctions screening" />;
@@ -66,7 +75,7 @@ function Panel() {
           <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>
           <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
           {note ? <Text>{note}</Text> : null}
-          <OwnershipNote view={view} onDone={load} compact={compact} />
+          <OwnershipNote view={view} onDone={changed} compact={compact} />
           {open.map((h) => {
             const owner = ownerOfHit(h, cp);
             return (
@@ -75,16 +84,16 @@ function Panel() {
                 {h.status !== 'pending' && h.reviewedBy !== 'rule:birth-year' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
                 <MatchEvidence hit={h} cp={cp} compact={compact} />
                 <ReviewedNote hit={h} />
-                {h.status === 'pending' && !compact ? <ReviewForm hit={h} cp={cp} onDone={load} /> : null}
+                {h.status === 'pending' && !compact ? <ReviewForm hit={h} cp={cp} onDone={changed} /> : null}
               </Stack>
             );
           })}
-          {/* The sidebar is a summary; reviewers decide in the wider panel, next to the full list entries. */}
+          {/* The sidebar is a summary; reviewers decide in the wider panel, which the app opens on each held work item. */}
           {compact && (open.some((h) => h.status === 'pending') || view?.assessment?.reason === 'minority')
             ? <Text color="color.text.subtle">{access && !access.allowed
-              ? `Decisions here are made by members of the Jira group ${access.group}. Open Sanctions Hold from View app actions, under the work item's title, to see each full list entry beside the vendor.`
-              : "To decide, open Sanctions Hold from View app actions, under the work item's title. It shows each full list entry beside the vendor."}</Text>
-            : compact && open.length ? <Text color="color.text.subtle">Open Sanctions Hold from View app actions, under the work item's title, to see each full list entry beside the vendor.</Text> : null}
+              ? `Members of the Jira group ${access.group} decide in the Sanctions Hold panel on this work item.`
+              : 'Decide in the Sanctions Hold panel on this work item.'}</Text>
+            : null}
           {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (

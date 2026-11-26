@@ -46,7 +46,7 @@ export function ordinaryVendors(n = 190, now = Date.now()) {
       key: `v${String(out.length + 1).padStart(3, '0')}`,
       name,
       country,
-      owners: i % 4 === 0 ? [`${OWNERS[i % OWNERS.length]} (100%)`] : [],
+      owners: i % 4 === 0 ? [`${OWNERS[(i / 4) % OWNERS.length]} (100%)`] : [],
       approvedAt: i % 6 === 5 ? null : new Date(now - (10 + ((i * 37) % 300)) * DAY).toISOString(),
     });
   }
