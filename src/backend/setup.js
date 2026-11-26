@@ -6,7 +6,7 @@ import { q, getSetting, setSetting, logEvent } from './db.js';
 import { jira, setProperty, adf } from './jira.js';
 import { demoVendors } from '../core/sample.js';
 import { addFieldToProjectScreens, setVendorField } from './vendor-field.js';
-import { HELD, moveToReview } from './screening.js';
+import { syncWorkItem } from './screening.js';
 
 const TEMPLATE = 'com.atlassian.jira-core-project-templates:jira-core-simplified-task-tracking';
 const VALIDATOR = '/static/approval-check';
@@ -43,10 +43,13 @@ async function existingStatus(name) {
 
 // Workflow changes on the new project: an "Approved" status reached through "Approve", which runs
 // the Sanctions Hold check; a "Sanctions review" status where the app moves a new vendor with an open
-// or confirmed match and an approved vendor that a list update matches, with "Approve" back out of it; and the template's "Done" transition renamed
-// so that closing a request is not read as approving it. Returns the two status ids.
+// match and an approved vendor that a list update matches, with "Approve" back out of it; a "Blocked"
+// status for a vendor that a confirmed match blocks; and the template's "Done" transition renamed
+// so that closing a request is not read as approving it. Returns the status ids.
 export const HOLD_STATUS = 'Sanctions review';
 export const HOLD_TRANSITION = 'Hold for sanctions review';
+export const BLOCK_STATUS = 'Blocked';
+export const BLOCK_TRANSITION = 'Block for sanctions';
 
 async function statusRef(name, statusCategory, description) {
   const found = await existingStatus(name);
@@ -69,9 +72,10 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
   }
 
   const approved = await statusRef('Approved', 'DONE', 'The vendor is approved for payment and contracts.');
-  const hold = await statusRef(HOLD_STATUS, 'IN_PROGRESS', 'The vendor or one of its owners has a possible or confirmed sanctions list match. A reviewer decides in Sanctions Hold before it can be approved.');
+  const hold = await statusRef(HOLD_STATUS, 'IN_PROGRESS', 'The vendor or one of its owners has a possible sanctions list match. A reviewer decides in Sanctions Hold before it can be approved.');
+  const blocked = await statusRef(BLOCK_STATUS, 'IN_PROGRESS', 'A reviewer confirmed a sanctions list match that blocks this vendor. Sanctions Hold moves it back to Sanctions review if the decision changes.');
   const statuses = read.statuses.map(({ id, name, statusCategory, statusReference, description }) => ({ id, name, statusCategory, statusReference, description }));
-  for (const x of [hold, approved]) if (!statuses.some((s) => s.statusReference === x.ref)) statuses.splice(1, 0, x.status);
+  for (const x of [blocked, hold, approved]) if (!statuses.some((s) => s.statusReference === x.ref)) statuses.splice(1, 0, x.status);
   const layout = wf.statuses.find((s) => s.statusReference === todo.statusReference)?.layout || { x: 0, y: 0 };
   let nextId = Math.max(...wf.transitions.map((t) => Number(t.id) || 0)) + 10;
   const doneRefs = new Set(read.statuses.filter((s) => s.statusCategory === 'DONE').map((s) => s.statusReference));
@@ -89,6 +93,7 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
       statuses: [
         ...wf.statuses.filter((x) => x.statusReference === todo.statusReference),
         { statusReference: hold.ref, layout: { x: layout.x + 520, y: layout.y + 240 }, properties: {} },
+        { statusReference: blocked.ref, layout: { x: layout.x + 780, y: layout.y + 360 }, properties: {} },
         { statusReference: approved.ref, layout: { x: layout.x + 260, y: layout.y + 120 }, properties: {} },
         ...wf.statuses.filter((x) => x.statusReference !== todo.statusReference),
       ],
@@ -102,7 +107,12 @@ export async function addApproveTransition({ projectId, taskTypeId }) {
         },
         {
           id: String(nextId += 10), name: HOLD_TRANSITION, type: 'DIRECTED', toStatusReference: hold.ref,
-          links: [{ fromStatusReference: approved.ref, fromPort: 4, toPort: 0 }, { fromStatusReference: todo.statusReference, fromPort: 5, toPort: 1 }],
+          links: [{ fromStatusReference: approved.ref, fromPort: 4, toPort: 0 }, { fromStatusReference: todo.statusReference, fromPort: 5, toPort: 1 }, { fromStatusReference: blocked.ref, fromPort: 3, toPort: 7 }],
+          validators: [], actions: [], triggers: [], properties: {},
+        },
+        {
+          id: String(nextId += 10), name: BLOCK_TRANSITION, type: 'DIRECTED', toStatusReference: blocked.ref,
+          links: [{ fromStatusReference: hold.ref, fromPort: 5, toPort: 1 }, { fromStatusReference: todo.statusReference, fromPort: 6, toPort: 2 }, { fromStatusReference: approved.ref, fromPort: 5, toPort: 0 }],
           validators: [], actions: [], triggers: [], properties: {},
         },
       ],
@@ -144,7 +154,7 @@ async function sampleRequests(target) {
     await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, id);
     await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id });
     keys.push(issue.key);
-    if (HELD.has(cp.status)) await moveToReview(issue.key).catch((e) => console.error('hold sample', issue.key, e.message));
+    await syncWorkItem(issue.key, 'todo', cp.status).catch((e) => console.error('hold sample', issue.key, e.message));
     if (v.approvedAt) {
       const t = await jira(route`/rest/api/3/issue/${issue.key}/transitions`);
       const approve = (t.transitions || []).find((x) => x.name === 'Approve');
@@ -161,8 +171,8 @@ export async function runSetup({ accountId }) {
   const step = async (text) => { state.steps.push(text); await setSetting('setup', state); };
   try {
     await step('Creating the Vendor onboarding project');
-    const project = await createProject('VEND', 'Vendor onboarding', 'Sanctions Hold: the Approve transition checks the vendor and its owners against the OFAC and UK sanctions lists.', accountId);
-    await step('Adding the Approve transition with the sanctions check and the Sanctions review status');
+    const project = await createProject('VEND', 'Vendor onboarding', 'Sanctions Hold: the Approve transition checks the vendor and its owners against the OFAC, UK and EU sanctions lists.', accountId);
+    await step('Adding the Approve transition with the sanctions check, and the Sanctions review and Blocked statuses');
     const { approvedId, holdId } = await addApproveTransition(project);
     await setSetting('onboarding', { ...project, statusId: approvedId, holdStatusId: holdId });
     await step('Adding the Vendor details field to the project screens');

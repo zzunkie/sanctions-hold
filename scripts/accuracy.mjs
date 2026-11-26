@@ -1,11 +1,12 @@
 // Offline accuracy run for the matcher.
-// usage: [UK=UK-Sanctions-List.xml] node scripts/accuracy.mjs <dir with OFAC CSV exports> [negatives: src/data/negatives.json, or a dir of GLEIF lei-records JSON pages] [threshold]
+// usage: [UK=UK-Sanctions-List.xml] [EU=eu-fsf-1_1.xml] node scripts/accuracy.mjs <dir with OFAC CSV exports> [negatives: src/data/negatives.json, or a dir of GLEIF lei-records JSON pages] [threshold]
 // env: SAMPLE (list entries to vary, default 1500), SEED (default 42), JSON=1 for machine-readable output,
-//      UK (UK Sanctions List XML), PEOPLE (person names not on the lists).
+//      UK (UK Sanctions List XML), EU (EU consolidated financial sanctions list XML 1.1), PEOPLE (person names not on the lists).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEntries, parseAliases } from '../src/core/ofac.js';
 import { parseUkXml } from '../src/core/uk.js';
+import { parseEuXml } from '../src/core/eu.js';
 import { buildIndex } from '../src/core/match.js';
 import { evaluate } from '../src/core/accuracy.js';
 
@@ -20,6 +21,12 @@ if (process.env.UK) {
   const uk = parseUkXml(readFileSync(process.env.UK, 'utf8')).entries;
   entries.push(...uk);
   aliases.push(...uk.flatMap((e) => e.aliases.map((a) => ({ id: e.id, name: a.n, type: a.t }))));
+}
+// EU=<path to the EU list XML> adds the EU consolidated list, as the app does.
+if (process.env.EU) {
+  const eu = parseEuXml(readFileSync(process.env.EU, 'utf8')).entries;
+  entries.push(...eu);
+  aliases.push(...eu.flatMap((e) => e.aliases.map((a) => ({ id: e.id, name: a.n, type: a.t }))));
 }
 let t0 = Date.now();
 const index = buildIndex(entries, aliases);

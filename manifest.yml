@@ -5,7 +5,7 @@ app:
     memoryMB: 1024
   rovo:
     tag: sanction
-    description: OFAC and UK sanctions screening for vendors and owners, with review
+    description: OFAC, UK and EU sanctions screening for vendors and owners, with review
       decisions in Jira
     keywords:
       - sanctions
@@ -49,7 +49,7 @@ modules:
     - key: vendor-details
       name: Vendor details
       description: Country, owners and directors of the vendor, with an owner's year of birth and
-        nationality when known, screened by Sanctions Hold against the OFAC and UK sanctions lists.
+        nationality when known, screened by Sanctions Hold against the OFAC, UK and EU sanctions lists.
       type: object
       schema:
         type: object
@@ -140,7 +140,7 @@ modules:
   rovo:agent:
     - key: sanctions-agent
       name: Sanctions Hold
-      description: Screens a company and its owners against the OFAC and UK sanctions
+      description: Screens a company and its owners against the OFAC, UK and EU sanctions
         lists, prepares review notes on a vendor's matches, opens onboarding requests in
         Jira and explains why an approval is held.
       prompt: resource:static;agent/prompt.txt
@@ -184,11 +184,11 @@ modules:
 
   action:
     - key: screen-counterparty
-      name: Screen a company or person against OFAC and UK sanctions lists
+      name: Screen a company or person against OFAC, UK and EU sanctions lists
       function: act-screen
       actionVerb: GET
       description: >-
-        Check a company or person and its owners and directors against the OFAC and UK sanctions lists, with aliases and spelling variants. Returns each match with its list, program and score, and the work item and status of a known vendor.
+        Check a company or person and its owners and directors against the OFAC, UK and EU sanctions lists, with aliases and spelling variants. Returns each match with its list, program and score, and the work item and status of a known vendor.
       inputs:
         name:
           title: Legal name
@@ -226,7 +226,7 @@ modules:
       function: act-changes
       actionVerb: GET
       description: >-
-        OFAC and UK list updates loaded in the last days: entries added, removed or changed, and the vendors, approved or pending, that gained a possible match from them.
+        OFAC, UK and EU list updates loaded in the last days: entries added, removed or changed, and the vendors, approved or pending, that gained a possible match from them.
       inputs:
         days:
           title: Days
@@ -352,3 +352,4 @@ permissions:
         - address: https://sanctionslistservice.ofac.treas.gov
         - address: https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com
         - address: https://sanctionslist.fcdo.gov.uk
+        - address: https://webgate.ec.europa.eu

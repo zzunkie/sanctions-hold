@@ -38,22 +38,28 @@ export const HitLozenge = ({ status, person = false }) => {
   return <Lozenge appearance={s.appearance}>{(person && s.person) || s.label}</Lozenge>;
 };
 
-export const listName = (l) => (l === 'SDN' ? 'OFAC SDN List' : l === 'CONS' ? 'OFAC Consolidated Sanctions List' : l === 'UK' ? 'UK Sanctions List' : l || '');
-// The reference a reviewer can look up on the list's own search: OFAC's entry number, the UK's Unique ID.
-export const entryRef = (hit) => (hit.entry?.list === 'UK' ? String(hit.entryId || '').replace(/^UK:/, '') : hit.entry?.entNum);
-// Current list dates, e.g. "OFAC 2026-11-23, UK 2026-11-24".
-export const listDates = (l) => (l ? [`OFAC ${l.published || 'unknown'}`, l.ukPublished ? `UK ${l.ukPublished}` : null].filter(Boolean).join(', ') : '');
+const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
+export const listName = (l) => LIST_NAMES[l] || l || '';
+// The reference a reviewer can look up on the list's own search: OFAC's entry number, the UK's
+// Unique ID, the EU reference number.
+export const entryRef = (hit) => {
+  if (hit.entry?.list === 'UK') return String(hit.entryId || '').replace(/^UK:/, '');
+  if (hit.entry?.list === 'EU') return /EU reference number (\S+?);/.exec(`${hit.entry.remarks || ''};`)?.[1] || String(hit.entryId || '').replace(/^EU:/, '');
+  return hit.entry?.entNum;
+};
+// Current list dates, e.g. "OFAC 2026-11-23, UK 2026-11-24, EU 2026-11-20".
+export const listDates = (l) => (l ? [`OFAC ${l.published || 'unknown'}`, l.ukPublished ? `UK ${l.ukPublished}` : null, l.euPublished ? `EU ${l.euPublished}` : null].filter(Boolean).join(', ') : '');
 // Non-breaking hyphens keep a date on one line in narrow table columns.
 export const fmtDate = (s) => (s ? String(s).slice(0, 10).replace(/-/g, '\u2011') : '');
 export const fmtTime = (s) => (s ? String(s).replace('T', ' ').slice(0, 16) : '');
 export const score = (n) => Number(n).toFixed(2);
-// List versions look like "2026-11-23+2026-11-24:6b7c553e" (OFAC and UK dates), with ":held" for the demo hold-back.
+// List versions look like "2026-11-23+2026-11-24+2026-11-20:6b7c553e" (OFAC, UK and EU dates), with ":held" for the demo hold-back.
 // The work item panel leaves the hold-back out; the Overview explains it once.
 export const fmtVersion = (v, { held: showHeld = true } = {}) => {
   if (!v) return '';
   const [dates, , held] = String(v).split(':');
-  const [ofac, uk] = dates.split('+');
-  return `OFAC ${ofac}${uk ? `, UK ${uk}` : ''}${held && showHeld ? ', newest SDN designations held back' : ''}`;
+  const [ofac, uk, eu] = dates.split('+');
+  return `OFAC ${ofac}${uk ? `, UK ${uk}` : ''}${eu ? `, EU ${eu}` : ''}${held && showHeld ? ', newest SDN designations held back' : ''}`;
 };
 export const matchedText = (h) => (h.entry && h.entry.name !== h.matchedName ? `${h.matchedName} (alias of ${h.entry.name})` : h.entry?.name || h.matchedName);
 // A non-breaking hyphen keeps a key such as VEND-5 on one line in narrow table cells.
@@ -96,7 +102,7 @@ export function MatchEvidence({ hit, cp }) {
     row('t', 'Type', owner ? 'person' : 'company', e.kind),
     ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),
     ...(e.kind === 'individual' && (facts.nationality || owner?.nationality) ? [row('i', 'Nationality', countryName(owner?.nationality) || 'not given', withTag(facts.nationality || 'none given', facts.nationalityCompared))] : []),
-    row('p', e.list === 'UK' ? 'Regime' : 'Program', '', e.programs || 'none given'),
+    row('p', e.list === 'UK' || e.list === 'EU' ? 'Regime' : 'Program', '', e.programs || 'none given'),
     row('a', 'Address', '', places.length ? places.join(' | ') : 'none given'),
   ];
   return (
@@ -104,7 +110,7 @@ export function MatchEvidence({ hit, cp }) {
       <Text>{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed from the list'}. Score ${score(hit.score)}${hit.matchedName !== e.name ? ', matched on an alias' : ''}.`}</Text>
       <DynamicTable head={{ cells: [{ key: 'l', content: '', width: 26 }, { key: 'v', content: 'This vendor', width: 37 }, { key: 'e', content: 'List entry', width: 37 }] }} rows={rows} />
       {aliases.length ? <Text color="color.text.subtle">{`Also known as: ${aliases.join('; ')}`}</Text> : null}
-      {e.remarks ? <Text color="color.text.subtle">{`${e.list === 'UK' ? 'UK list details' : 'OFAC remarks'}: ${clip(e.remarks, 600)}`}</Text> : null}
+      {e.remarks ? <Text color="color.text.subtle">{`${e.list === 'UK' ? 'UK list details' : e.list === 'EU' ? 'EU list details' : 'OFAC remarks'}: ${clip(e.remarks.replace(/^EU reference number \S+?(; |$)/, ''), 600)}`}</Text> : null}
     </Stack>
   );
 }
@@ -144,10 +150,13 @@ const stop = (s) => (/[.]$/.test(s) ? s : `${s}.`);
 const one = (a) => (a.people || []).length === 1;
 // Which ownership rules a confirmed minority owner or director falls short of, and what is left to decide.
 const ruleNote = (a) => {
-  const uk = 'The UK also covers a company that a designated person controls, for example by appointing most of the board, and adds up holdings held under a joint arrangement, so check whether either applies.';
-  if (a.uk && a.ofac) return `Neither OFAC's 50 Percent Rule nor the UK ownership test blocks the company at this shareholding. ${uk}`;
-  if (a.uk) return `The UK ownership test does not block the company at this shareholding. ${uk}`;
-  return "OFAC's 50 Percent Rule does not block the company at this shareholding.";
+  const rules = [a.ofac || (!a.uk && !a.eu) ? "OFAC's 50 Percent Rule" : null, a.uk ? 'the UK ownership test' : null, a.eu ? 'the EU ownership rule' : null].filter(Boolean);
+  const upper = (s) => s[0].toUpperCase() + s.slice(1);
+  const none = rules.length === 1 ? `${upper(rules[0])} does not block` : rules.length === 2 ? `Neither ${rules[0]} nor ${rules[1]} blocks` : `${upper(rules.slice(0, -1).join(', '))} and ${rules[rules.length - 1]} do not block`;
+  const uk = 'The UK also covers a company that a designated person controls, for example by appointing or removing a majority of the board, and adds up shares or voting rights held under a joint arrangement.';
+  const eu = 'The EU also treats a company as controlled by a listed person who, for example, can appoint or remove a majority of its board or use all or part of its assets.';
+  const control = [a.uk ? uk : null, a.eu ? eu : null].filter(Boolean);
+  return [`${none} the company at this shareholding.`, ...control, control.length ? 'Check whether that applies.' : null].filter(Boolean).join(' ');
 };
 export function OwnershipNote({ view, onDone }) {
   const a = view.assessment || {};
@@ -166,6 +175,9 @@ export function OwnershipNote({ view, onDone }) {
   }
   if (a.reason === 'uk-majority') {
     return <SectionMessage appearance="error" title="Blocked under the UK ownership test"><Text>{`${listedPeople(a)}, confirmed as listed on the UK Sanctions List, holds ${a.share}% of ${stop(cp.name)} The UK treats a company in which a designated person holds more than 50% as subject to the asset freeze.`}</Text></SectionMessage>;
+  }
+  if (a.reason === 'eu-ownership') {
+    return <SectionMessage appearance="error" title="Blocked under the EU ownership rule"><Text>{`${listedPeople(a)}, confirmed on the EU consolidated list, ${one(a) ? 'holds' : 'hold a combined'} ${a.share}% of ${stop(cp.name)} Under the EU Best Practices, a company in which listed persons hold 50% or more in the aggregate is in principle owned by them, so its assets are frozen and no funds may be made available to it.`}</Text></SectionMessage>;
   }
   if (a.reason === 'share-unknown') {
     return <SectionMessage appearance="error" title="Owner's share missing"><Text>{`${listedPeople(a)} is confirmed as a listed person, and the share is not given. Approval stays blocked until the share is entered in Vendor details.`}</Text></SectionMessage>;

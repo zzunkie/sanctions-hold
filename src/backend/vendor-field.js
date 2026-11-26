@@ -60,11 +60,15 @@ export async function addFieldToProjectScreens(projectId, projectKey) {
     const tabs = await jira(route`/rest/api/3/screens/${screenId}/tabs`);
     const tab = tabs?.[0];
     if (!tab) continue;
-    const present = await jira(route`/rest/api/3/screens/${screenId}/tabs/${tab.id}/fields`);
-    if ((present || []).some((f) => f.id === id)) continue;
+    const present = (await jira(route`/rest/api/3/screens/${screenId}/tabs/${tab.id}/fields`)) || [];
     try {
-      await jira(route`/rest/api/3/screens/${screenId}/tabs/${tab.id}/fields`, 'POST', { fieldId: id });
-      added += 1;
+      if (!present.some((f) => f.id === id)) {
+        await jira(route`/rest/api/3/screens/${screenId}/tabs/${tab.id}/fields`, 'POST', { fieldId: id });
+        added += 1;
+      }
+      // Right after the summary, so the create dialog shows it under the vendor's name and description.
+      const anchor = present.some((x) => x.id === 'summary') ? { after: 'summary' } : { position: 'First' };
+      await jira(route`/rest/api/3/screens/${screenId}/tabs/${tab.id}/fields/${id}/move`, 'POST', anchor);
     } catch (e) {
       errors.push(`${screenId}: ${e.message.slice(0, 200)}`);
     }

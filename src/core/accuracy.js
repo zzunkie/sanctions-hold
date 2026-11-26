@@ -96,12 +96,29 @@ export function evalPositives(index, entries, aliasesById, { threshold = 0.92, s
   return { sample: chosen.length, positives, misses, ms, queries };
 }
 
+// Up to max flagged names, taken a country at a time so that one country does not fill the list.
+export function spread(flagged, max = 15) {
+  const by = new Map();
+  for (const f of flagged) { if (!by.has(f.country)) by.set(f.country, []); by.get(f.country).push(f); }
+  const out = [];
+  for (let i = 0; out.length < max && [...by.values()].some((l) => l.length > i); i += 1) {
+    for (const l of by.values()) if (l[i] && out.length < max) out.push(l[i]);
+  }
+  return out;
+}
+
+const tally = (by, country, flagged) => {
+  const c = by[country || '?'] ||= { n: 0, flagged: 0 };
+  c.n += 1;
+  if (flagged) c.flagged += 1;
+};
+
 // A company whose name, without the legal form, equals a list name must be reviewed by any
 // screening; it is counted apart from false positives.
 export function evalCompanies(index, negatives, { threshold = 0.92, clock = () => Date.now() } = {}) {
   const listNames = new Set(index.names.map((n) => n.tokens.join(' ')));
-  const neg = { n: 0, falsePositives: 0, sameName: 0 };
-  const fpSamples = [];
+  const neg = { n: 0, falsePositives: 0, sameName: 0, byCountry: {} };
+  const flagged = [];
   const sameSamples = [];
   let ms = 0;
   let queries = 0;
@@ -112,16 +129,17 @@ export function evalCompanies(index, negatives, { threshold = 0.92, clock = () =
     const hits = screen(index, c.name, { threshold });
     ms += clock() - t0;
     queries += 1;
-    if (hits.length) { neg.falsePositives += 1; if (fpSamples.length < 15) fpSamples.push({ name: c.name, country: c.country, matched: hits[0].matchedName, score: hits[0].score }); }
+    tally(neg.byCountry, c.country, hits.length > 0);
+    if (hits.length) { neg.falsePositives += 1; flagged.push({ name: c.name, country: c.country, matched: hits[0].matchedName, score: hits[0].score }); }
   }
-  return { negatives: neg, fpSamples, sameSamples, ms, queries };
+  return { negatives: neg, fpSamples: spread(flagged), sameSamples, ms, queries };
 }
 
 // A person whose words, in any order, equal a list name ("Wei Zhang" and "ZHANG, Wei") is counted apart.
 export function evalPeople(index, people, { threshold = 0.92, clock = () => Date.now() } = {}) {
   const sorted = new Set(index.names.map((n) => [...n.tokens].sort().join(' ')));
-  const peopleNeg = { n: 0, falsePositives: 0, sameName: 0 };
-  const peopleSamples = [];
+  const peopleNeg = { n: 0, falsePositives: 0, sameName: 0, byCountry: {} };
+  const flagged = [];
   let ms = 0;
   let queries = 0;
   for (const p of people) {
@@ -131,9 +149,10 @@ export function evalPeople(index, people, { threshold = 0.92, clock = () => Date
     const hits = screen(index, p.name, { threshold });
     ms += clock() - t0;
     queries += 1;
-    if (hits.length) { peopleNeg.falsePositives += 1; if (peopleSamples.length < 15) peopleSamples.push({ name: p.name, country: p.country, matched: hits[0].matchedName, score: hits[0].score }); }
+    tally(peopleNeg.byCountry, p.country, hits.length > 0);
+    if (hits.length) { peopleNeg.falsePositives += 1; flagged.push({ name: p.name, country: p.country, matched: hits[0].matchedName, score: hits[0].score }); }
   }
-  return { people: peopleNeg, peopleSamples, ms, queries };
+  return { people: peopleNeg, peopleSamples: spread(flagged), ms, queries };
 }
 
 // Merges the parts into one result.

@@ -87,7 +87,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     if (status !== cp.status) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: version } });
     if (ids) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
     if (cp.approved_at && r.opened.length) approvedMatched.push({ cp, opened: r.opened });
-    else if (!cp.approved_at && cp.issue_key && HELD.has(status) && !HELD.has(cp.status)) newlyHeld.push(cp.issue_key);
+    else if (cp.issue_key && status !== cp.status && (status === 'blocked' || cp.status === 'blocked' || (!cp.approved_at && status === 'review'))) newlyHeld.push([cp.issue_key, cp.status, status]);
   }
   const update = `ON DUPLICATE KEY UPDATE queried_name = VALUES(queried_name), matched_name = VALUES(matched_name), score = VALUES(score),
                   status = VALUES(status), active = 1, entry_hash = VALUES(entry_hash)`;
@@ -105,7 +105,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
   await logEvents(events);
   for (const m of approvedMatched) await notifyApprovedMatch(m, cache).catch((e) => console.error('notify', m.cp.issue_key, e.message));
-  for (const k of newlyHeld) await moveToReview(k).catch((e) => console.error('hold', k, e.message));
+  for (const [k, from, to] of newlyHeld) await syncWorkItem(k, from, to).catch((e) => console.error('hold', k, e.message));
   return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
 }
 
@@ -114,12 +114,12 @@ async function notifyApprovedMatch({ cp, opened }, cache) {
   if (!cp.issue_key) return;
   const lines = opened.map((o) => {
     const e = cache.index.byEntry.get(o.entryId);
-    const list = e?.list === 'SDN' ? 'OFAC SDN List' : e?.list === 'UK' ? 'UK Sanctions List' : 'OFAC Consolidated Sanctions List';
+    const list = { SDN: 'OFAC SDN List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' }[e?.list] || 'OFAC Consolidated Sanctions List';
     return `${o.matchedName} (${list}, ${e?.programs || 'no program given'}${e?.countries ? `; ${e.countries}` : ''}), score ${Number(o.score).toFixed(2)} for "${o.queriedName}"`;
   });
   await comment(
     cp.issue_key,
-    `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}) has a possible match for this approved vendor.`,
+    `Sanctions Hold: the latest sanctions list update (OFAC ${cache.state.published || 'unknown'}${cache.state.ukPublished ? `, UK ${cache.state.ukPublished}` : ''}${cache.state.euPublished ? `, EU ${cache.state.euPublished}` : ''}) has a possible match for this approved vendor.`,
     ...lines,
     'The vendor is back in the review queue and this work item moves to Sanctions review. Decide in the Sanctions Hold panel whether it is the same party.',
   );
@@ -127,12 +127,22 @@ async function notifyApprovedMatch({ cp, opened }, cache) {
   await moveToReview(cp.issue_key).catch((e) => console.error('hold', cp.issue_key, e.message));
 }
 
-// Statuses that hold approval; their work items belong in "Sanctions review".
+// Statuses that hold approval: a vendor waiting for review belongs in "Sanctions review", a blocked one in "Blocked".
 export const HELD = new Set(['review', 'blocked']);
 
-// Move a work item to the "Sanctions review" status, where Approve runs the check again.
-export async function moveToReview(issueKey) {
+async function moveTo(issueKey, statusName) {
   const t = await jira(route`/rest/api/3/issue/${issueKey}/transitions`);
-  const hold = (t.transitions || []).find((x) => x.to?.name === 'Sanctions review');
-  if (hold) await jira(route`/rest/api/3/issue/${issueKey}/transitions`, 'POST', { transition: { id: hold.id } });
+  const tr = (t.transitions || []).find((x) => x.to?.name === statusName);
+  if (tr) await jira(route`/rest/api/3/issue/${issueKey}/transitions`, 'POST', { transition: { id: tr.id } });
+}
+
+// Move a work item to the "Sanctions review" status, where Approve runs the check again.
+export const moveToReview = (issueKey) => moveTo(issueKey, 'Sanctions review');
+
+// Keep the work item's status in step with the vendor's: Blocked while a confirmed match blocks it,
+// back to Sanctions review when a reviewer reopens or changes that decision.
+export async function syncWorkItem(issueKey, from, to) {
+  if (!issueKey || from === to) return;
+  if (to === 'blocked') await moveTo(issueKey, 'Blocked');
+  else if (from === 'blocked' || to === 'review') await moveToReview(issueKey);
 }

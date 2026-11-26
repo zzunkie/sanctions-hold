@@ -8,7 +8,7 @@ const STATUS_NOTE = {
   'listed-person': 'A reviewer confirmed a listed owner or director. Approval is blocked.',
   pending: 'Approval is held until a reviewer decides each possible match below.',
   dismissed: 'Every possible match was reviewed and dismissed. The vendor can be approved.',
-  none: 'No possible match on the OFAC or UK sanctions lists. The vendor can be approved.',
+  none: 'No possible match on the OFAC, UK or EU sanctions lists. The vendor can be approved.',
 };
 
 function Panel() {
@@ -73,7 +73,7 @@ function Panel() {
         </Stack>
       ) : (
         <Stack space="space.100">
-          <Text>Not screened yet. Check the vendor's legal name, country and owners, then screen it against the OFAC and UK sanctions lists.</Text>
+          <Text>Not screened yet. Check the vendor's legal name, country and owners, then screen it against the OFAC, UK and EU sanctions lists.</Text>
           {fields}
         </Stack>
       )}

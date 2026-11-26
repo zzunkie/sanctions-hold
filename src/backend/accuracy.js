@@ -47,7 +47,7 @@ export async function runAccuracy(step = 'positives') {
     threshold, recall: r.recall, total: r.total, positives: r.positives, falsePositiveRate: r.falsePositiveRate, negatives: r.negatives,
     people: r.people, peopleSamples: r.peopleSamples.slice(0, 10),
     avgMs: r.avgMs, queries: r.queries, fpSamples: r.fpSamples.slice(0, 10), misses: r.misses,
-    listVersion: cache.version, listPublished: cache.state.published, ukPublished: cache.state.ukPublished || null, listNames: r.listNames, at: new Date().toISOString(), seconds,
+    listVersion: cache.version, listPublished: cache.state.published, ukPublished: cache.state.ukPublished || null, euPublished: cache.state.euPublished || null, listNames: r.listNames, at: new Date().toISOString(), seconds,
   };
   await setSetting('accuracy:last', result);
   return { recall: r.recall, falsePositiveRate: r.falsePositiveRate, seconds };

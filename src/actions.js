@@ -4,7 +4,7 @@ import { route } from '@forge/api';
 import { ensureSchema, q, iso, dt, logEvent, getSetting } from './backend/db.js';
 import { loadIndex } from './backend/screen-index.js';
 import { screenNames, getPolicy, screenCounterparties } from './backend/screening.js';
-import { counterpartyView, createCounterparty } from './backend/counterparties.js';
+import { counterpartyView, createCounterparty, NEXT } from './backend/counterparties.js';
 import { jira, adf, setProperty, comment } from './backend/jira.js';
 import { setVendorField } from './backend/vendor-field.js';
 import { CP_PROPERTY } from './backend/setup.js';
@@ -13,7 +13,7 @@ import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
 import { compareOwner } from './core/evidence.js';
 
-const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List' };
+const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
 const text = (v, n = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const trimStop = (v) => String(v ?? '').trim().replace(/[.\s]+$/, '');
 const STATUS_TEXT = {
@@ -75,12 +75,12 @@ export async function screenCounterparty(payload, context) {
   await logEvent({ counterpartyId: known?.id || null, type: 'screened_by_tool', detail: { name, owners, country, matches: matches.length, threshold, listVersion: cache.version, via: viaOf(payload) }, actor: callerOf(payload, context) || viaOf(payload) });
   const answer = matches.length
     ? `${open.length ? 'Possible match' : 'Reviewed match'} for "${name}": ${matches.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || ''}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
-    : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists as updated on ${cache.state.published}${cache.state.ukPublished ? ` or the UK Sanctions List as updated on ${cache.state.ukPublished}` : ''}.`;
+    : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists (updated ${cache.state.published})${cache.state.ukPublished ? `, the UK Sanctions List (updated ${cache.state.ukPublished})` : ''}${cache.state.euPublished ? ` or the EU Consolidated Financial Sanctions List (updated ${cache.state.euPublished})` : ''}.`;
   // A known vendor is answered from its record first, where the reviewers' decisions are.
   const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}.${stored.length ? ` Screened with the owners and directors on its record (${stored.join(', ')}).` : ''} ` : '';
   return {
     answer: knownText + answer, result: open.length ? 'possible_match' : confirmed.length ? 'confirmed_match' : 'no_match', threshold,
-    listPublished: cache.state.published, ukListPublished: cache.state.ukPublished || null, listVersion: cache.version, screenedOwners: owners, matches,
+    listPublished: cache.state.published, ukListPublished: cache.state.ukPublished || null, euListPublished: cache.state.euPublished || null, listVersion: cache.version, screenedOwners: owners, matches,
     knownCounterparty: known ? { name: known.name, status: known.status, meaning: STATUS_TEXT[known.status], workItem: known.issue_key } : null,
   };
 }
@@ -92,6 +92,9 @@ async function lookup(key) {
     ? q('SELECT id FROM counterparty WHERE issue_key = ? ORDER BY created_at DESC LIMIT 1', key.toUpperCase())
     : q('SELECT id FROM counterparty WHERE name = ? OR name LIKE ? ORDER BY name = ? DESC, created_at DESC LIMIT 3', key, `%${key}%`, key);
 }
+
+// The ownership rule that decides a vendor's status, said in the answer.
+const OWNERSHIP_REASONS = new Set(['fifty-percent', 'uk-majority', 'eu-ownership', 'share-unknown', 'minority']);
 
 export async function counterpartyStatus(payload) {
   await ensureSchema();
@@ -107,9 +110,11 @@ export async function counterpartyStatus(payload) {
   const answer = `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${STATUS_TEXT[cp.status] || cp.status}.`
     + (open.length ? ` ${open.map((h) => (h.status === 'confirmed' ? `Confirmed: ${h.matchedName} (${trimStop(h.reason)})` : `Waiting for review: ${h.matchedName}, score ${Number(h.score).toFixed(2)}`)).join('; ')}.` : '')
     + (reviewed.length ? ` Dismissed after review: ${reviewed.map((h) => `${h.matchedName} (${trimStop(h.reason)})`).join('; ')}.` : '')
+    + (OWNERSHIP_REASONS.has(v.assessment?.reason) ? ` ${NEXT[v.assessment.reason]}` : '')
     + (cp.screened_at ? ` Last screened ${cp.screened_at.slice(0, 16).replace('T', ' ')} UTC.` : '');
   return {
     found: true, answer, name: cp.name, country: cp.country, owners: cp.owners, workItem: cp.issue_key, status: cp.status, meaning: STATUS_TEXT[cp.status],
+    reason: v.assessment?.reason || null,
     approvedAt: cp.approved_at, lastScreenedAt: cp.screened_at, listVersion: cp.screened_version,
     matches: v.hits.map((h) => ({ listEntry: h.entryId, name: h.entry?.name || h.matchedName, score: h.score, status: h.status, onList: h.entry?.onList ?? null, reviewedAt: h.reviewedAt, reason: h.reason })),
     lastApproval: approval ? { at: approval.at, by: approval.actor } : null,
@@ -215,12 +220,12 @@ export async function matchEvidence(payload, context) {
         aliases: (e.aliases || []).map((a) => a.n).slice(0, 15), addresses: (e.addresses || []).map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 5),
         remarks: clipText(e.remarks, 2500), stillListed: e.onList,
       } : null,
-      compared: owner ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared' } : null,
+      compared: owner ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared', address: 'not compared: the vendor record has no address for owners and directors' } : null,
     };
   });
   const waiting = matches.filter((m) => m.review === 'waiting for review').length;
   return {
-    found: true, workItem: cp.issue_key, name: cp.name, country: cp.country ? countryNameOf(cp.country) : null, status: cp.status, meaning: STATUS_TEXT[cp.status],
+    found: true, workItem: cp.issue_key, name: cp.name, companyRegisteredIn: cp.country ? countryNameOf(cp.country) : null, status: cp.status, meaning: STATUS_TEXT[cp.status],
     owners: owners.map((o) => ({ name: o.name, role: o.role, share: o.share ?? null, born: o.born || null, nationality: o.nationality ? countryNameOf(o.nationality) : null })),
     answer: `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}, ${waiting} waiting for review. Compare each list entry with the person or company it was found for.`,
     matches,

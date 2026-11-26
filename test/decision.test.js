@@ -40,15 +40,19 @@ test('owners: confirmed listed owners at 50% or more block the company; a minori
   assert.equal(assess([hit('Crescent Bay Marine Services FZE')], cp).reason, 'company');
 });
 
-test('UK-listed owners: one person above 50% blocks; holdings of different people are not added up', () => {
+test('UK-listed owners: one person above 50% blocks, holdings are not added up; EU and OFAC add them up, per list', () => {
   const cp = { name: 'Northgate Metals Ltd', owners: ['Ivan Petrov (40%)', 'Oleg Sidorov (40%)', 'Anna Berg (20%)'] };
   const uk = (queried) => ({ entry_id: `UK:RUS${queried.length}`, queried_name: queried, status: 'confirmed', active: 1 });
   const ofac = (queried) => ({ entry_id: `SDN:${queried.length}`, queried_name: queried, status: 'confirmed', active: 1 });
+  const eu = (queried) => ({ entry_id: `EU:${queried.length}`, queried_name: queried, status: 'confirmed', active: 1 });
   assert.equal(assess([uk('Ivan Petrov'), uk('Oleg Sidorov')], cp).reason, 'minority');
   assert.equal(assess([ofac('Ivan Petrov'), ofac('Oleg Sidorov')], cp).reason, 'fifty-percent');
+  assert.equal(assess([eu('Ivan Petrov'), eu('Oleg Sidorov')], cp).reason, 'eu-ownership');
+  assert.equal(assess([ofac('Ivan Petrov'), eu('Oleg Sidorov')], cp).reason, 'minority');
   const majority = { name: 'Northgate Metals Ltd', owners: ['Ivan Petrov (51%)', 'Anna Berg (49%)'] };
   assert.equal(assess([uk('Ivan Petrov')], majority).reason, 'uk-majority');
   const half = { name: 'Northgate Metals Ltd', owners: ['Ivan Petrov (50%)', 'Anna Berg (50%)'] };
   assert.equal(assess([uk('Ivan Petrov')], half).reason, 'minority');
   assert.equal(assess([ofac('Ivan Petrov')], half).reason, 'fifty-percent');
+  assert.equal(assess([eu('Ivan Petrov')], half).reason, 'eu-ownership');
 });

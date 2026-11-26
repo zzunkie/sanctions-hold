@@ -1,9 +1,10 @@
 // Screens the sample vendors against downloaded OFAC exports, to check which ones match.
-// usage: [UK=UK-Sanctions-List.xml] node scripts/sample-check.mjs <dir with OFAC CSV exports> [threshold]
+// usage: [UK=UK-Sanctions-List.xml] [EU=eu-fsf-1_1.xml] node scripts/sample-check.mjs <dir with OFAC CSV exports> [threshold]
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEntries, parseAliases } from '../src/core/ofac.js';
 import { parseUkXml } from '../src/core/uk.js';
+import { parseEuXml } from '../src/core/eu.js';
 import { buildIndex, screen } from '../src/core/match.js';
 import { ordinaryVendors, demoVendors } from '../src/core/sample.js';
 import { ownerNames } from '../src/core/owners.js';
@@ -19,6 +20,12 @@ if (process.env.UK) {
   const uk = parseUkXml(readFileSync(process.env.UK, 'utf8')).entries;
   entries.push(...uk);
   aliases.push(...uk.flatMap((e) => e.aliases.map((a) => ({ id: e.id, name: a.n, type: a.t }))));
+}
+// EU=<path to the EU list XML> adds the EU consolidated list, as the app does.
+if (process.env.EU) {
+  const eu = parseEuXml(readFileSync(process.env.EU, 'utf8')).entries;
+  entries.push(...eu);
+  aliases.push(...eu.flatMap((e) => e.aliases.map((a) => ({ id: e.id, name: a.n, type: a.t }))));
 }
 const index = buildIndex(entries, aliases);
 for (const v of [...ordinaryVendors(), ...demoVendors()]) {

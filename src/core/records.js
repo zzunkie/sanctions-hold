@@ -1,5 +1,5 @@
-// Turn the OFAC CSV exports and the UK Sanctions List into one record per list entry (entities and
-// individuals), and work out what changed against the entries already stored.
+// Turn the OFAC CSV exports, the UK Sanctions List and the EU consolidated list into one record per
+// list entry (entities and individuals), and work out what changed against the entries already stored.
 import { parseEntries, parseAliases, parseAddresses } from './ofac.js';
 
 // 64-bit FNV-1a as 16 hex characters; enough to notice that an entry changed.
@@ -43,9 +43,9 @@ function record(e, al, ad) {
   };
 }
 
-// files: { SDN: {prim, alt, add}, CONS: {prim, alt, add} } as text; uk: entries from parseUkXml.
+// files: { SDN: {prim, alt, add}, CONS: {prim, alt, add} } as text; uk, eu: entries from parseUkXml, parseEuXml.
 // holdBackFrom: leave out SDN entries with ent_num >= this number (demo replay of new designations).
-export function buildRecords(files, { holdBackFrom = null, uk = [] } = {}) {
+export function buildRecords(files, { holdBackFrom = null, uk = [], eu = [] } = {}) {
   const records = [];
   for (const [list, f] of Object.entries(files)) {
     const aliases = group(parseAliases(f.alt, list));
@@ -58,7 +58,7 @@ export function buildRecords(files, { holdBackFrom = null, uk = [] } = {}) {
       records.push(record(e, al, ad));
     }
   }
-  for (const e of uk) records.push(record({ ...e, entNum: e.entNum }, e.aliases, e.addresses));
+  for (const e of [...uk, ...eu]) records.push(record(e, e.aliases, e.addresses));
   return records;
 }
 

@@ -1,5 +1,5 @@
 // Sample vendors for trying the app. The ordinary vendors are invented names; the demo cases use
-// real OFAC and UK list names (spelling variants, an owner, a later designation) or a near miss.
+// real OFAC, UK and EU list names (spelling variants, an owner, a later designation) or a near miss.
 
 const PREFIX = [
   'Northwind', 'Bluefield', 'Harbor Point', 'Cedar Ridge', 'Silverline', 'Granite Peak', 'Riverbend', 'Oakmont',
@@ -27,7 +27,7 @@ const OWNERS = [
 export const COUNTRY_NAMES = {
   US: 'United States', GB: 'United Kingdom', DE: 'Germany', FR: 'France', NL: 'Netherlands', IN: 'India',
   SG: 'Singapore', CA: 'Canada', JP: 'Japan', KR: 'Korea, South', MX: 'Mexico', AE: 'United Arab Emirates',
-  IE: 'Ireland', IR: 'Iran', TR: 'Turkey', CN: 'China', HK: 'Hong Kong', RU: 'Russia', LB: 'Lebanon',
+  IE: 'Ireland', LT: 'Lithuania', IR: 'Iran', TR: 'Turkey', CN: 'China', HK: 'Hong Kong', RU: 'Russia', LB: 'Lebanon',
 };
 
 const DAY = 864e5;
@@ -87,6 +87,10 @@ export function demoVendors(now = Date.now()) {
     {
       key: 'd-namesake', name: 'Savannah Freight Ltd', country: 'KE', owners: ['Yusuf Ibrahim (100%, born 1990, nationality Kenya)'], approvedAt: null, request: true,
       note: 'The owner shares a common name with two listed people; his year of birth and nationality differ from both, so a reviewer dismisses them.',
+    },
+    {
+      key: 'd-eu', name: 'Klaipeda Machine Parts UAB', country: 'LT', owners: ['Ruta Petrauskiene (45%)', 'Konstantin Nikolayev (30%, born 1971, nationality Russia)', 'Sergey Atlivanchik (25%, born 1980, nationality Russia)'], approvedAt: null, request: true,
+      note: 'Two owners with 30% and 25% are on the EU list only. The EU adds up the holdings of listed owners, so once both are confirmed their 55% blocks it.',
     },
     {
       key: 'd-later-us', name: 'Berkeley Trading LLC', country: 'US', owners: [], approvedAt: new Date(now - 210 * DAY).toISOString(),

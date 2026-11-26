@@ -8,6 +8,7 @@ const SUFFIXES = new Set([
   'BV', 'NV', 'PLC', 'LLP', 'LP', 'JSC', 'OJSC', 'PJSC', 'CJSC', 'OAO', 'ZAO', 'OOO', 'TOO', 'AO', 'PAO', 'FZE', 'FZCO',
   'FZC', 'FZ', 'FZLLC', 'DMCC', 'PTE', 'PVT', 'PRIVATE', 'SDN', 'BHD', 'KG', 'SPA', 'SAS', 'SARL', 'AS', 'AB', 'OY', 'KFT',
   'ZRT', 'DOO', 'LTDA', 'CIA', 'SL', 'SAC', 'SRO', 'EIRL', 'SAPI', 'CV', 'DE', 'RL', 'TIC', 'AS', 'AŞ', 'ŞTI', 'STI', 'SANAYI',
+  'UAB', 'SIA', 'APS', 'OYJ', 'EOOD', 'OOD',
 ]);
 // Long legal-form words, also recognised with a typo ("COPORATION", "COMPNAY").
 const LONG_SUFFIXES = ['LIMITED', 'COMPANY', 'CORPORATION', 'INCORPORATED', 'PRIVATE'];
@@ -169,20 +170,25 @@ export function personParts(name) {
 // trailing word that the list entry has. For a listed person, an owner written with the surname
 // and one given name ("Viktor Bout" for "BOUT, Viktor Anatolijevitch") is not marked down for the
 // other given names, patronymics or titles the list has, as long as the surname is spelled as
-// listed, or the given name is and the surname differs by at most one letter.
+// listed, or the given name is and the surname differs by at most one letter. Such a match scores
+// at most 0.97, so that only a name matching every listed word scores 1.00.
 export function nameScore(qTokens, cTokens, weight = () => 1, qCompact = qTokens.join(''), cCompact = cTokens.join(''), person = null) {
   if (!qTokens.length || !cTokens.length) return 0;
   const sq = coverage(qTokens, cTokens, weight);
   let sc = coverage(cTokens, qTokens, weight);
+  let partial = false;
   // 0.7 * sq + 0.3 can only reach a threshold of 0.88 when sq is at least 0.83.
   if (person && person.given.length > 1 && sq >= 0.8) {
     const best = (t) => Math.max(...qTokens.map((x) => tokenSim(t, x)));
     const given = person.given.reduce((a, t) => (best(t) > best(a) ? t : a), person.given[0]);
     const surnameExact = person.surname.every((t) => best(t) === 1);
     const surnameNear = person.surname.every((t) => qTokens.some((x) => x === t || oneEdit(x, t)));
-    if (surnameExact || (best(given) === 1 && surnameNear)) sc = Math.max(sc, coverage([...person.surname, given], qTokens, weight));
+    if (surnameExact || (best(given) === 1 && surnameNear)) {
+      const part = coverage([...person.surname, given], qTokens, weight);
+      if (part > sc) { sc = part; partial = true; }
+    }
   }
-  const token = 0.7 * sq + 0.3 * sc;
+  const token = partial ? Math.min(0.97, 0.7 * sq + 0.3 * sc) : 0.7 * sq + 0.3 * sc;
   // Spacing and hyphen differences: the compact names may differ by one edit in twenty letters.
   const len = Math.max(qCompact.length, cCompact.length);
   const k = Math.floor(len / 20);
@@ -226,7 +232,8 @@ export function idfWeight(df, N) {
 // Screen one name. Candidates come from the blocking keys of the query's rarest tokens.
 export function screen(index, query, { threshold = 0.88, limit = 10, maxCandidates = 4000 } = {}) {
   const q = tokenize(query);
-  if (!q.length) return [];
+  // A name with no word of two letters or more (a name in another script leaves single letters) cannot be screened.
+  if (!q.some((t) => t.length > 1)) return [];
   const weight = idfWeight(index.df, index.N);
   const qc = compact(query);
   const rare = [...new Set(q)].sort((a, b) => weight(b) - weight(a)).slice(0, 3);

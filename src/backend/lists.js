@@ -1,9 +1,10 @@
-// List import: check whether OFAC or the UK has published a new version, download the OFAC CSV
-// exports and the UK Sanctions List XML, store one row per entry and record what was added,
-// removed or changed.
+// List import: check whether OFAC, the UK or the EU has published a new version, download the OFAC
+// CSV exports, the UK Sanctions List XML and the EU consolidated list XML, store one row per entry
+// and record what was added, removed or changed.
 import { fetch } from '@forge/api';
 import { OFAC_BASE, LISTS } from '../core/ofac.js';
 import { UK_URL, parseUkXml } from '../core/uk.js';
+import { EU_URL, EU_RSS, parseEuRss, parseEuXml } from '../core/eu.js';
 import { buildRecords, diffRecords, hash16 } from '../core/records.js';
 import { q, insertMany, marks, getSetting, setSetting, logEvent, nowDt } from './db.js';
 
@@ -12,6 +13,15 @@ const FILES = Object.values(LISTS).flatMap((l) => [l.prim, l.alt, l.add]);
 const PUBLISHED_RE = /\/Published\/[^/]+\/(\d{4}-\d{2}-\d{2})\/([0-9a-f-]{8,})\//;
 
 export const listState = () => getSetting('list', null);
+
+// The list servers answer an occasional request with a 5xx; try twice more before giving up.
+async function fetchRetry(url, options) {
+  for (let i = 0; ; i += 1) {
+    const res = await fetch(url, options).catch((e) => (i < 2 ? null : Promise.reject(e)));
+    if (res && (res.status < 500 || i >= 2)) return res;
+    await new Promise((r) => { setTimeout(r, 3000 * (i + 1)); });
+  }
+}
 
 // The current publication without downloading the files: the redirect names the publication, and
 // SDN.CSV (the only export that answers HEAD) gives the date the list was last updated, which is
@@ -39,19 +49,43 @@ async function ukPublication() {
   return { id: head.headers.get('etag') || modified || '', published: modified ? new Date(modified).toISOString().slice(0, 10) : null };
 }
 
+// The EU publishes a small RSS feed with the file's checksum; the file itself answers HEAD with its
+// modification time and length when the feed cannot be read.
+async function euPublication() {
+  const rss = await fetch(EU_RSS).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+  const item = parseEuRss(rss);
+  if (item) return { id: item.checksum, published: item.published, url: item.url };
+  const head = await fetch(EU_URL, { method: 'HEAD' });
+  if (!head.ok) throw new Error(`EU consolidated list: HTTP ${head.status}`);
+  const modified = head.headers.get('last-modified');
+  return { id: `${modified || ''}|${head.headers.get('content-length') || ''}`, published: modified ? new Date(modified).toISOString().slice(0, 10) : null, url: EU_URL };
+}
+
 export async function currentPublication() {
-  const [ofac, uk] = await Promise.all([ofacPublication(), ukPublication()]);
-  return { id: hash16(`${ofac.id}|${uk.id}`), published: ofac.published, ukPublished: uk.published };
+  const [ofac, uk, eu] = await Promise.all([ofacPublication(), ukPublication(), euPublication()]);
+  return { id: hash16(`${ofac.id}|${uk.id}|${eu.id}`), published: ofac.published, ukPublished: uk.published, euPublished: eu.published, euUrl: eu.url };
 }
 
 async function downloadUk() {
-  const res = await fetch(UK_URL);
+  const res = await fetchRetry(UK_URL);
   if (!res.ok) throw new Error(`UK Sanctions List: HTTP ${res.status}`);
-  return parseUkXml(Buffer.from(await res.arrayBuffer()).toString('utf8'));
+  const uk = parseUkXml(Buffer.from(await res.arrayBuffer()).toString('utf8'));
+  // An empty parse would mark every UK entry as removed.
+  if (!uk.entries.length) throw new Error('UK Sanctions List: no entries in the file');
+  return uk;
+}
+
+// About 26 MB, sent gzip-compressed (about 3.4 MB).
+async function downloadEu(url) {
+  const res = await fetchRetry(url || EU_URL, { headers: { 'Accept-Encoding': 'gzip' } });
+  if (!res.ok) throw new Error(`EU consolidated list: HTTP ${res.status}`);
+  const eu = parseEuXml(Buffer.from(await res.arrayBuffer()).toString('utf8'));
+  if (!eu.entries.length) throw new Error('EU consolidated list: no entries in the file');
+  return eu;
 }
 
 async function download(file) {
-  const res = await fetch(`${OFAC_BASE}${file}`);
+  const res = await fetchRetry(`${OFAC_BASE}${file}`);
   if (!res.ok) throw new Error(`OFAC ${file}: HTTP ${res.status}`);
   const text = Buffer.from(await res.arrayBuffer()).toString('latin1');
   return { text, published: PUBLISHED_RE.exec(res.url || '')?.[1] || null, modified: res.headers.get('last-modified') };
@@ -67,12 +101,13 @@ export async function importLists({ reason = 'update', holdBackFrom = null } = {
   const pub = await currentPublication();
   const digest = pub.id;
   const got = {};
-  const [uk] = await Promise.all([downloadUk(), ...FILES.map(async (f) => { got[f] = await download(f); })]);
+  const [uk, eu] = await Promise.all([downloadUk(), downloadEu(pub.euUrl), ...FILES.map(async (f) => { got[f] = await download(f); })]);
   const files = Object.fromEntries(Object.entries(LISTS).map(([list, l]) => [list, { prim: got[l.prim].text, alt: got[l.alt].text, add: got[l.add].text }]));
   const published = pub.published || got['SDN.CSV'].published;
-  const records = buildRecords(files, { holdBackFrom, uk: uk.entries });
+  const records = buildRecords(files, { holdBackFrom, uk: uk.entries, eu: eu.entries });
   const ukCount = uk.entries.length;
-  const version = `${published || 'unknown'}${pub.ukPublished ? `+${pub.ukPublished}` : ''}:${digest.slice(0, 8)}${holdBackFrom ? ':held' : ''}`;
+  const euCount = eu.entries.length;
+  const version = `${published || 'unknown'}+${pub.ukPublished || 'unknown'}+${pub.euPublished || 'unknown'}:${digest.slice(0, 8)}${holdBackFrom ? ':held' : ''}`;
 
   const existing = await q('SELECT entry_id, hash, active FROM list_entry');
   const initial = existing.length === 0;
@@ -95,25 +130,26 @@ export async function importLists({ reason = 'update', holdBackFrom = null } = {
       ...added.map(change('added')), ...changed.map(change('changed')), ...removedRows.map(change('removed')),
     ]);
   }
-  const note = holdBackFrom ? `Demo: SDN entries numbered ${holdBackFrom} and later held back` : initial ? 'First import' : null;
+  const note = holdBackFrom ? `Sample start: SDN entries numbered ${holdBackFrom} and later come in the next update` : initial ? 'First import' : null;
   await q('INSERT INTO list_version (id, published, fetched_at, entries, added, removed, changed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE fetched_at = VALUES(fetched_at)',
     version, published, now, records.length, initial ? 0 : added.length, removed.length, changed.length, note);
   const state = {
-    version, published, ukPublished: pub.ukPublished, digest, entries: records.length, ofacEntries: records.length - ukCount, ukEntries: ukCount,
-    fetchedAt: new Date().toISOString(), holdBackFrom: holdBackFrom || null, lists: [...Object.keys(LISTS), 'UK'],
+    version, published, ukPublished: pub.ukPublished, euPublished: pub.euPublished, digest, entries: records.length,
+    ofacEntries: records.length - ukCount - euCount, ukEntries: ukCount, euEntries: euCount,
+    fetchedAt: new Date().toISOString(), holdBackFrom: holdBackFrom || null, lists: [...Object.keys(LISTS), 'UK', 'EU'],
   };
   await setSetting('list', state);
-  await logEvent({ type: 'list_updated', detail: { version, published, ukPublished: pub.ukPublished, initial, heldBack: Boolean(holdBackFrom), entries: records.length, added: initial ? 0 : added.length, changed: changed.length, removed: removed.length, reason }, actor: 'app' });
+  await logEvent({ type: 'list_updated', detail: { version, published, ukPublished: pub.ukPublished, euPublished: pub.euPublished, initial, heldBack: Boolean(holdBackFrom), entries: records.length, added: initial ? 0 : added.length, changed: changed.length, removed: removed.length, reason }, actor: 'app' });
   return { ...state, added: initial ? 0 : added.length, changed: changed.length, removed: removed.length, initial };
 }
 
-// Hourly: import only when OFAC or the UK published a new version.
+// Hourly: import only when OFAC, the UK or the EU published a new version.
 export async function checkForUpdate() {
   const state = await listState();
   if (!state) return { changed: false, reason: 'not loaded' };
   const pub = await currentPublication();
   const digest = pub.id;
-  await setSetting('listCheck', { at: new Date().toISOString(), digest, published: pub.published, ukPublished: pub.ukPublished });
+  await setSetting('listCheck', { at: new Date().toISOString(), digest, published: pub.published, ukPublished: pub.ukPublished, euPublished: pub.euPublished });
   if (digest === state.digest) return { changed: false };
   return { changed: true };
 }

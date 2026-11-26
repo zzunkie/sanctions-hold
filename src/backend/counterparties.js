@@ -5,6 +5,7 @@ import { ownerList, ownerStrings, peopleText } from '../core/owners.js';
 import { parseCsv } from '../core/csv.js';
 import { sampleVendors } from '../core/sample.js';
 import { comment, removeLabel } from './jira.js';
+import { syncWorkItem } from './screening.js';
 
 const clean = (s, n = 400) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const country = (c) => clean(c, 8).toUpperCase() || null;
@@ -89,10 +90,11 @@ export const shapeHit = (h) => ({
 });
 
 // What the vendor's status means after a decision, for the comment on its work item.
-const NEXT = {
+export const NEXT = {
   company: 'Approval stays blocked.',
   'fifty-percent': 'Confirmed OFAC-listed owners hold 50% or more of the company, so it is blocked under OFAC\'s 50 Percent Rule. Approval stays blocked.',
   'uk-majority': 'A confirmed owner listed by the UK holds more than 50% of the company, so it is subject to the UK asset freeze. Approval stays blocked.',
+  'eu-ownership': 'Confirmed owners listed by the EU hold 50% or more of the company, so it is subject to the EU asset freeze. Approval stays blocked.',
   'share-unknown': 'The listed owner\'s share is not given, so approval stays blocked until the share is entered.',
   'listed-person': 'Approval stays blocked.',
   minority: 'The listed people stay below the ownership thresholds. A reviewer decides in the Sanctions Hold panel whether to proceed or block.',
@@ -126,6 +128,7 @@ export async function decideCounterparty({ counterpartyId, decision, reason }, a
       decision === 'proceed' ? 'The vendor can be approved.' : 'Approval stays blocked.').catch((e) => console.error('comment', e.message));
     await removeLabel(cp.issue_key, 'sanctions-review').catch(() => null);
   }
+  await syncWorkItem(cp.issue_key, cp.status, status).catch((e) => console.error('status', cp.issue_key, e.message));
   return { status };
 }
 
@@ -152,6 +155,7 @@ export async function reviewMatch({ counterpartyId, entryId, decision, reason },
       .catch((e) => console.error('comment', e.message));
     if (status !== 'review') await removeLabel(cp.issue_key, 'sanctions-review').catch(() => null);
   }
+  await syncWorkItem(cp.issue_key, cp.status, status).catch((e) => console.error('status', cp.issue_key, e.message));
   return { status };
 }
 
