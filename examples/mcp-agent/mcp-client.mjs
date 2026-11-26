@@ -30,7 +30,11 @@ export function details(tool, r) {
     return (r.matches || []).map((m) => `• ${m.screenedName || m.foundFor?.owner || ''} ~ ${[m.name, `${shortList(m.list)}${m.euReferenceNumber ? ` ${m.euReferenceNumber}` : ''}`, m.reviewed || m.review].filter(Boolean).join(', ')}`);
   }
   if (tool.startsWith('match-evidence')) {
-    return (r.matches || []).map((m) => `• ${m.foundFor?.owner || r.name} ~ ${m.name}: year of birth ${m.compared?.yearOfBirth || 'not compared'}, nationality ${m.compared?.nationality || 'not compared'}${m.review && m.review !== 'waiting for review' ? ` (${m.review})` : ''}`);
+    const LABELS = { yearOfBirth: 'year of birth', nationality: 'nationality', country: 'country', registrationNumber: 'registration' };
+    return (r.matches || []).map((m) => {
+      const compared = Object.entries(m.compared || {}).map(([k, v]) => `${LABELS[k] || k} ${v || 'not compared'}`).join(', ') || 'nothing to compare';
+      return `• ${m.foundFor?.owner || r.name} ~ ${m.name}: ${compared}${m.review && m.review !== 'waiting for review' ? ` (${m.review})` : ''}`;
+    });
   }
   if (tool.startsWith('list-changes')) return (r.newPossibleMatches || []).map((m) => `• ${m.vendor}${m.workItem ? ` (${m.workItem})` : ''} ~ ${m.matchedName}, ${m.listEntry}, ${m.approved ? 'approved' : 'not approved yet'}`);
   return [];

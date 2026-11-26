@@ -182,7 +182,7 @@ async function openReviewItem(cp) {
   });
   // Linked first, so the work item's created event finds the vendor instead of adding a second one.
   await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, cp.id);
-  await setVendorField(issue.key, { country: cp.country, owners: ownerStrings(cp.owners) }).catch((e) => console.error('vendor field', issue.key, e.message));
+  await setVendorField(issue.key, { country: cp.country, owners: ownerStrings(cp.owners), address: cp.address, registrationNumber: cp.reg_no }).catch((e) => console.error('vendor field', issue.key, e.message));
   await setProperty(issue.key, 'sanctions-hold-counterparty', { counterpartyId: cp.id }).catch(() => null);
   return issue.key;
 }

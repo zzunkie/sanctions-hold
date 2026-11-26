@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Lozenge, Text, Stack, Inline, Strong, Link, Button, TextArea, Label, SectionMessage, DynamicTable } from '@forge/react';
 import { invoke } from '@forge/bridge';
 import { COUNTRY_NAMES } from '../core/sample.js';
@@ -7,7 +7,7 @@ import { ownerList, formatOwner, peopleText } from '../core/owners.js';
 
 // OFAC writes some countries differently ("Korea, South"), so both spellings are tried when comparing.
 export const countryName = (c) => (c ? COUNTRY_NAMES[String(c).toUpperCase()] || countryNameOf(c) || c : '');
-import { countrySpellings, compareOwner } from '../core/evidence.js';
+import { countrySpellings, compareOwner, compareRegistration } from '../core/evidence.js';
 
 export async function call(name, payload = {}) {
   const res = await invoke(name, payload);
@@ -77,13 +77,17 @@ export const ownerOfHit = (hit, cp) => (hit.queriedName === cp.name ? null
 export function placesOfHit(hit, cp) {
   const owner = ownerOfHit(hit, cp);
   if (!owner) return `${countryName(cp.country) || 'not given'} / ${hit.entry?.countries || 'none given'}`;
-  const listed = hit.entry ? compareOwner(owner, hit.entry).nationality : null;
-  return `Nationality: ${countryName(owner.nationality) || 'not given'} / ${listed || 'none given'}`;
+  const f = hit.entry ? compareOwner(owner, hit.entry) : {};
+  const nationality = `Nationality: ${countryName(owner.nationality) || 'not given'} / ${f.nationality || 'none given'}`;
+  // The year of birth too when either side gives one, so a namesake born decades apart shows in the queue.
+  const listedYears = f.born ? [...new Set(String(f.born).match(/\b(?:18|19|20)\d{2}\b/g) || [])].join(', ') : null;
+  return owner.born || listedYears ? `${nationality}; born ${owner.born ? String(owner.born).slice(0, 4) : 'not given'} / ${listedYears || 'none given'}` : nationality;
 }
 
 // The evidence a reviewer needs, side by side: what the vendor gave and what the list entry says.
 // In the narrow sidebar (compact) only the entry and the year of birth, nationality or country are shown.
 export function MatchEvidence({ hit, cp, compact = false }) {
+  const [showRemarks, setShowRemarks] = useState(false);
   const e = hit.entry;
   if (!e) return <Text>{`${hit.matchedName} (${hit.entryId}); the list entry is no longer stored.`}</Text>;
   const owner = ownerOfHit(hit, cp);
@@ -92,6 +96,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
   const listed = String(e.countries || '').toLowerCase();
   const sameCountry = cp.country && listed ? countrySpellings(cp.country).some((x) => listed.includes(x)) : null;
   const facts = compareOwner(owner, e);
+  const reg = owner ? { ids: [], registrationCompared: null } : compareRegistration(cp.registrationNumber, e);
   // Red when the owner's detail agrees with the list entry, green when it differs.
   const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'success'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
@@ -103,7 +108,8 @@ export function MatchEvidence({ hit, cp, compact = false }) {
         <Text color="color.text.subtle">{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed'}. Score ${score(hit.score)}.`}</Text>
         {owner
           ? [line('Born', owner.born || 'not given', facts.born || 'none given', facts.bornCompared), line('Nationality', countryName(owner.nationality) || 'not given', facts.nationality || 'none given', facts.nationalityCompared)]
-          : line('Country', countryName(cp.country) || 'not given', e.countries || 'none given', sameCountry === null ? null : sameCountry ? 'same' : 'differs')}
+          : [line('Country', countryName(cp.country) || 'not given', e.countries || 'none given', sameCountry === null ? null : sameCountry ? 'same' : 'differs'),
+            ...(reg.registrationCompared ? [line('Registration', cp.registrationNumber, reg.registrationCompared === 'same' ? cp.registrationNumber : reg.ids.map((x) => x.value).slice(0, 3).join(', '), reg.registrationCompared)] : [])]}
         <Text color="color.text.subtle">{`${e.list === 'UK' || e.list === 'EU' ? 'Regime' : 'Program'}: ${e.programs || 'none given'}`}</Text>
       </Stack>
     );
@@ -118,20 +124,38 @@ export function MatchEvidence({ hit, cp, compact = false }) {
     ...((owner ? e.kind !== 'individual' : e.kind === 'individual') ? [row('t', 'Type', owner ? 'person' : 'company', e.kind)] : []),
     ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),
     ...(e.kind === 'individual' && (facts.nationality || owner?.nationality) ? [row('i', 'Nationality', countryName(owner?.nationality) || 'not given', withTag(facts.nationality || 'none given', facts.nationalityCompared))] : []),
+    // For a company: its registered address and registration or license number next to the entry's.
+    ...(!owner && (cp.address || places.length) ? [row('a', 'Address', cp.address || 'not given', places.length ? places.join(' | ') : 'none given')] : []),
+    ...(!owner && (cp.registrationNumber || reg.ids.length) ? [row('r', 'Registration', cp.registrationNumber || 'not given',
+      withTag(reg.ids.length ? reg.ids.slice(0, 4).map((x) => `${x.label} ${x.value}`).join('; ') : 'none given', reg.registrationCompared))] : []),
   ];
   return (
     <Stack space="space.075">
       <Text>{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed from the list'}, ${e.list === 'UK' || e.list === 'EU' ? 'regime' : 'program'} ${e.programs || 'not given'}. Score ${score(hit.score)}${hit.matchedName !== e.name ? ', matched on an alias' : ''}.`}</Text>
       <DynamicTable head={{ cells: [{ key: 'l', content: '', width: 26 }, { key: 'v', content: 'This vendor', width: 37 }, { key: 'e', content: 'List entry', width: 37 }] }} rows={rows} />
       {aliases.length ? <Text color="color.text.subtle">{`Also known as: ${aliases.join('; ')}`}</Text> : null}
-      {places.length ? <Text color="color.text.subtle">{`Addresses on the entry: ${places.join(' | ')}`}</Text> : null}
-      {e.remarks ? <Text color="color.text.subtle">{`${e.list === 'UK' ? 'UK list details' : e.list === 'EU' ? 'EU list details' : 'OFAC remarks'}: ${clip(e.remarks.replace(/^EU reference number \S+?(; |$)/, ''), 600)}`}</Text> : null}
+      {owner && places.length ? <Text color="color.text.subtle">{`Addresses on the entry: ${places.join(' | ')}`}</Text> : null}
+      {e.remarks && showRemarks ? <Text color="color.text.subtle">{`${e.list === 'UK' ? 'UK list details' : e.list === 'EU' ? 'EU list details' : 'OFAC remarks'}: ${clip(e.remarks.replace(/^EU reference number \S+?(; |$)/, ''), 600)}`}</Text> : null}
+      {e.remarks ? <Inline><Button appearance="subtle" spacing="compact" onClick={() => setShowRemarks(!showRemarks)}>{`${showRemarks ? 'Hide' : 'Show'} the ${e.list === 'UK' ? 'UK list details' : e.list === 'EU' ? 'EU list details' : 'OFAC remarks'}`}</Button></Inline> : null}
     </Stack>
   );
 }
 
+// Whether this user decides possible matches: everyone, unless Settings names a Jira group of reviewers.
+let accessOnce = null;
+export function useReviewAccess() {
+  const [access, setAccess] = useState(null);
+  useEffect(() => {
+    accessOnce = accessOnce || call('reviewAccess').catch(() => ({ allowed: true, group: null }));
+    accessOnce.then(setAccess);
+  }, []);
+  return access;
+}
+const ReviewersNote = ({ group }) => <Text color="color.text.subtle">{`Possible matches are decided by members of the Jira group ${group}.`}</Text>;
+
 // Decision buttons with a required reason. For an owner or director the question is whether it is the same person.
 export function ReviewForm({ hit, cp, onDone }) {
+  const access = useReviewAccess();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
@@ -144,6 +168,7 @@ export function ReviewForm({ hit, cp, onDone }) {
       onDone(r);
     } catch (e) { setError(e.message); } finally { setBusy(null); }
   };
+  if (access && !access.allowed) return <ReviewersNote group={access.group} />;
   return (
     <Stack space="space.100">
       <Label labelFor={`reason-${hit.entryId}`}>Reason (kept in the audit record)</Label>
@@ -174,6 +199,7 @@ const ruleNote = (a) => {
   return [`${none} the company at this shareholding.`, ...control, control.length ? 'Check whether that applies.' : null].filter(Boolean).join(' ');
 };
 export function OwnershipNote({ view, onDone }) {
+  const access = useReviewAccess();
   const a = view.assessment || {};
   const cp = view.counterparty;
   const [reason, setReason] = useState('');
@@ -204,7 +230,7 @@ export function OwnershipNote({ view, onDone }) {
       <Stack space="space.100">
         <Text>{`${listedPeople(a)} ${one(a) ? 'is' : 'are'} confirmed as listed and ${stop(a.share ? `${one(a) ? 'holds' : 'hold'} ${a.share}% of ${cp.name}${one(a) ? '' : ' together'}` : `${one(a) ? 'is a director' : 'are directors'}`)} ${ruleNote(a)} Sanctions on the listed person still apply.`}</Text>
         {decided ? <Text color="color.text.subtle">{`Decision on ${fmtDate(cp.decision_at)}: ${cp.decision_reason || ''}`}</Text> : null}
-        {decided && !changing ? (
+        {access && !access.allowed ? <ReviewersNote group={access.group} /> : decided && !changing ? (
           <Inline><Button appearance="subtle" onClick={() => setChanging(true)}>Change the decision</Button></Inline>
         ) : (
           <Stack space="space.100">

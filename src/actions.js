@@ -11,7 +11,7 @@ import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
 import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
-import { compareOwner, listFacts, birthYearClears } from './core/evidence.js';
+import { compareOwner, listFacts, birthYearClears, compareRegistration, countrySpellings } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
 // The EU reference number ("EU.12764.77") that the panel and the Commission's file show for an EU entry.
@@ -191,6 +191,8 @@ export async function requestApproval(payload, context) {
   }
   const owners = ownerStrings(ownersFrom(payload?.owners));
   const country = countryCode(payload?.country);
+  const address = text(payload?.address, 300) || null;
+  const registrationNumber = text(payload?.registrationNumber, 64) || null;
   const note = text(payload?.note, 1000);
   const accountId = callerOf(payload, context);
   const issue = await createIssue({
@@ -199,8 +201,8 @@ export async function requestApproval(payload, context) {
     summary: name.slice(0, 250),
     description: adf([viaOf(payload) === 'rovo' ? 'Requested through the Sanctions Hold agent in Rovo' : 'Requested through the Sanctions Hold tools in an MCP client', ...(accountId ? [' by ', { mention: accountId }] : []), '.'], note ? `Note: ${note}` : null),
   });
-  await setVendorField(issue.key, { country, owners }).catch((e) => console.error('vendor field', e.message));
-  const id = await createCounterparty({ name, country, owners, issueKey: issue.key, source: viaOf(payload) }, accountId || viaOf(payload));
+  await setVendorField(issue.key, { country, owners, address, registrationNumber }).catch((e) => console.error('vendor field', e.message));
+  const id = await createCounterparty({ name, country, owners, address, registrationNumber, issueKey: issue.key, source: viaOf(payload) }, accountId || viaOf(payload));
   await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id }).catch(() => null);
   await screenCounterparties([id], { actor: accountId || 'mcp', reason: 'requested through MCP' });
   const v = await counterpartyView(id);
@@ -232,24 +234,30 @@ export async function matchEvidence(payload, context) {
     const owner = h.queriedName === cp.name ? null
       : owners.find((o) => o.name.toLowerCase() === String(h.queriedName).toLowerCase()) || { name: h.queriedName, role: 'owner', share: null };
     const facts = e ? compareOwner(owner, e) : {};
+    const reg = !owner && e ? compareRegistration(cp.reg_no, e) : null;
+    const listedCountries = String(e?.countries || '').toLowerCase();
+    const sameCountry = !owner && cp.country && listedCountries ? (countrySpellings(cp.country).some((x) => listedCountries.includes(x)) ? 'same' : 'differs') : null;
     return {
       listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedName, score: h.score,
       review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? 'confirmed as the same party' : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : 'dismissed as not the same party',
       reviewReason: h.reason || null,
       foundFor: owner
         ? { owner: owner.name, role: owner.role, share: owner.share ?? null, born: owner.born || null, nationality: owner.nationality ? countryNameOf(owner.nationality) : null }
-        : { company: cp.name, country: cp.country ? countryNameOf(cp.country) : null },
+        : { company: cp.name, country: cp.country ? countryNameOf(cp.country) : null, address: cp.address || null, registrationNumber: cp.reg_no || null },
       listDetails: e ? {
         type: e.kind, programOrRegime: e.programs || null, countries: e.countries || null, born: facts.born, nationality: facts.nationality,
         aliases: (e.aliases || []).map((a) => a.n).slice(0, 15), addresses: (e.addresses || []).map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 5),
+        ...(reg?.ids.length ? { registrationNumbers: reg.ids.map((x) => `${x.label} ${x.value}${x.country ? ` (${x.country})` : ''}`) } : {}),
         remarks: clipText(e.remarks, 2500), stillListed: e.onList,
       } : null,
-      compared: owner ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared', address: 'not compared: the vendor record has no address for owners and directors' } : null,
+      compared: owner
+        ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared' }
+        : { country: sameCountry || 'not compared', registrationNumber: reg?.registrationCompared || 'not compared' },
     };
   });
   const waiting = matches.filter((m) => m.review === 'waiting for review').length;
   return {
-    found: true, workItem: cp.issue_key, name: cp.name, companyRegisteredIn: cp.country ? countryNameOf(cp.country) : null, status: cp.status, meaning: STATUS_TEXT[cp.status],
+    found: true, workItem: cp.issue_key, name: cp.name, companyRegisteredIn: cp.country ? countryNameOf(cp.country) : null, address: cp.address || null, registrationNumber: cp.reg_no || null, status: cp.status, meaning: STATUS_TEXT[cp.status],
     owners: owners.map((o) => ({ name: o.name, role: o.role, share: o.share ?? null, born: o.born || null, nationality: o.nationality ? countryNameOf(o.nationality) : null })),
     answer: `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}, ${waiting} waiting for review. Compare each list entry with the person or company it was found for.`,
     matches,

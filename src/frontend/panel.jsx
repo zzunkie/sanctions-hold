@@ -24,14 +24,14 @@ function Panel() {
   const load = () => call('issueView', { issueKey }).then((r) => {
     setData(r);
     const cp = r.view?.counterparty;
-    setForm(cp ? { name: cp.name, country: cp.country || '', owners: cp.owners.join('; ') } : { name: r.suggestion?.name || '', country: r.suggestion?.country || '', owners: (r.suggestion?.owners || []).join('; ') });
+    setForm(cp ? { name: cp.name, country: cp.country || '', address: cp.address || '', registrationNumber: cp.registrationNumber || '', owners: cp.owners.join('; ') } : { name: r.suggestion?.name || '', country: r.suggestion?.country || '', address: '', registrationNumber: '', owners: (r.suggestion?.owners || []).join('; ') });
   }, (e) => setError(e.message));
   useEffect(() => { if (issueKey) load(); }, [issueKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      const r = await call('issueSetVendor', { issueKey, name: form.name, country: form.country, owners: form.owners.split(';').map((s) => s.trim()).filter(Boolean) });
+      const r = await call('issueSetVendor', { issueKey, name: form.name, country: form.country, address: form.address, registrationNumber: form.registrationNumber, owners: form.owners.split(';').map((s) => s.trim()).filter(Boolean) });
       setData((d) => ({ ...d, view: r.view }));
       setEditing(false);
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -46,7 +46,9 @@ function Panel() {
     <Stack space="space.100">
       <Stack space="space.050"><Label labelFor="pname">Vendor legal name</Label><Textfield id="pname" defaultValue={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Stack>
       <Stack space="space.050"><Label labelFor="pcountry">Country (2 letters)</Label><Textfield id="pcountry" defaultValue={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></Stack>
-      <Stack space="space.050"><Label labelFor="powners">Owners with their share, and directors, separated by ;</Label><Textfield id="powners" placeholder="Ali Kalhor 60%; Sara Haddad director" defaultValue={form.owners} onChange={(e) => setForm({ ...form, owners: e.target.value })} /></Stack>
+      <Stack space="space.050"><Label labelFor="paddress">Registered address</Label><Textfield id="paddress" defaultValue={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Stack>
+      <Stack space="space.050"><Label labelFor="preg">Registration or license number</Label><Textfield id="preg" defaultValue={form.registrationNumber} onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })} /></Stack>
+      <Stack space="space.050"><Label labelFor="powners">Owners with their share, and directors, separated by ;</Label><Textfield id="powners" placeholder="Ali Kalhor 60% born 1963 nationality Iran; Sara Haddad director" defaultValue={form.owners} onChange={(e) => setForm({ ...form, owners: e.target.value })} /></Stack>
       <Inline><Button appearance="primary" isLoading={busy} onClick={save}>{cp ? 'Save and screen again' : 'Screen this vendor'}</Button></Inline>
     </Stack>
   ) : null;
@@ -61,7 +63,7 @@ function Panel() {
       {cp ? (
         <Stack space="space.150">
           <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>
-          <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${countryName(cp.country) || 'No country'} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
+          <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
           {note ? <Text>{note}</Text> : null}
           <OwnershipNote view={view} onDone={load} />
           {open.map((h) => {
@@ -77,7 +79,7 @@ function Panel() {
             );
           })}
           {compact && open.length ? <Text color="color.text.subtle">The wider panel under the work item's Apps button shows each full list entry side by side with the vendor.</Text> : null}
-          {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit name, country or owners</Button></Inline>}
+          {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (
         <Stack space="space.100">

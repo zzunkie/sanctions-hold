@@ -45,8 +45,8 @@ export async function onIssueCreated(event) {
     if (res.ok) fields = { ...fields, ...(await res.json()).fields };
   }
   const fromField = fieldId ? detailsFromField(fields[fieldId]) : null;
-  const { country, owners } = fromField?.owners?.length || fromField?.country ? fromField : detailsFromDescription(fields.description);
-  const id = await createCounterparty({ name, country, owners, issueKey: issue.key, source: 'jira' }, event.atlassianId || 'jira');
+  const { country, owners, address = null, registrationNumber = null } = fromField?.owners?.length || fromField?.country || fromField?.address || fromField?.registrationNumber ? fromField : detailsFromDescription(fields.description);
+  const id = await createCounterparty({ name, country, owners, address, registrationNumber, issueKey: issue.key, source: 'jira' }, event.atlassianId || 'jira');
   await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id }).catch(() => null);
   await screenCounterparties([id], { actor: 'jira', reason: 'work item created' });
 }
@@ -69,7 +69,7 @@ export async function onIssueUpdated(event) {
   });
 }
 
-// Someone edited the Vendor details field: store the new country and owners and screen again.
+// Someone edited the Vendor details field: store the new details and screen again.
 async function onVendorFieldEdited(event, fieldId) {
   const cp = await byIssue(event.issue.key);
   if (!cp) return;
@@ -77,6 +77,6 @@ async function onVendorFieldEdited(event, fieldId) {
   if (!res.ok) return;
   const d = detailsFromField((await res.json()).fields?.[fieldId]);
   if (!d) return;
-  await updateCounterparty(cp.id, { name: cp.name, country: d.country, owners: d.owners }, event.atlassianId || 'jira');
+  await updateCounterparty(cp.id, { name: cp.name, country: d.country, owners: d.owners, address: d.address, registrationNumber: d.registrationNumber }, event.atlassianId || 'jira');
   await screenCounterparties([cp.id], { actor: event.atlassianId || 'jira', reason: 'Vendor details edited' });
 }

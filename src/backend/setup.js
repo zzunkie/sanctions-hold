@@ -148,7 +148,7 @@ async function sampleRequests(target) {
       labels: ['sanctions-hold-sample'],
       description: adf(`Onboarding request for ${v.name}, from the Sanctions Hold sample.`),
     });
-    await setVendorField(issue.key, { country: v.country, owners: v.owners }).catch((e) => console.error('vendor field', issue.key, e.message));
+    await setVendorField(issue.key, { country: v.country, owners: v.owners, address: v.address, registrationNumber: v.registrationNumber }).catch((e) => console.error('vendor field', issue.key, e.message));
     await q('UPDATE counterparty SET issue_key = ? WHERE id = ?', issue.key, id);
     await setProperty(issue.key, CP_PROPERTY, { counterpartyId: id });
     keys.push(issue.key);

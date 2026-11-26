@@ -14,11 +14,21 @@ export const fmtDob = (s) => String(s)
   .replace(/(\d{2}|--)\/(\d{2}|--)\/(\d{4})/g, (_, d, m, y) => dm(d === '--' ? 0 : d, m === '--' ? 0 : m, y))
   .replace(/\b0(\d) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, '$1 $2');
 
+// The years a date of birth allows: OFAC writes a range as "1955 to 1957" (every year in it) and an
+// approximate year as "circa 1951" (taken as two years either side).
+function yearsOfDob(d) {
+  const ys = (String(d).match(/\b(?:18|19|20)\d{2}\b/g) || []).map(Number);
+  const span = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => String(a + i));
+  if (ys.length === 2 && /\bto\b/i.test(d) && ys[1] >= ys[0] && ys[1] - ys[0] <= 30) return span(ys[0], ys[1]);
+  if (ys.length === 1 && /\b(circa|approx(imately)?|about)\b/i.test(d)) return span(ys[0] - 2, ys[0] + 2);
+  return ys.map(String);
+}
+
 export function listFacts(entry) {
   const r = entry?.remarks || '';
   const dobs = [...r.matchAll(/\bDOB:?\s*([^;]+)/gi)].map((m) => fmtDob(m[1].trim()));
   const nats = [...new Set([...r.matchAll(/\b(?:nationality|citizen):?\s*([^;]+)/gi)].map((m) => m[1].trim()))];
-  const years = [...new Set(dobs.flatMap((d) => d.match(/\b(?:18|19|20)\d{2}\b/g) || []))];
+  const years = [...new Set(dobs.flatMap(yearsOfDob))];
   return { born: dobs.length ? [...new Set(dobs)].join('; ') : null, years, nationality: nats.length ? nats.join('; ') : null };
 }
 
@@ -38,4 +48,41 @@ export function compareOwner(owner, entry) {
   const listed = (f.nationality || '').toLowerCase();
   const nationality = owner?.nationality && listed ? (countrySpellings(owner.nationality).some((x) => listed.includes(x)) ? 'same' : 'differs') : null;
   return { ...f, bornCompared: born, nationalityCompared: nationality };
+}
+
+// Company registration, tax and license numbers on a list entry. OFAC remarks write "Registration Number
+// 1027700012345 (Russia)", "alt. License 1066766 (United Arab Emirates)" or "Tax ID No. 7704..."; the UK
+// details "registration 123, 456"; EU remarks "Registration number: ...".
+const ID_LABELS = [
+  'registration number', 'registration id', 'registration no.', 'registration', 'business registration number', 'company number',
+  'uk company number', 'commercial registry number', 'commercial registration number', 'tax id no.', 'tax identification number',
+  'license', 'licence', 'trade license no.', 'trade license number', 'unified social credit code (uscc)', 'legal entity number',
+  'government gazette number', 'chamber of commerce number', 'istanbul chamber of comm. no.', 'c.r. no.', 'c.i.n.',
+  'enterprise number', 'business number', 'public registration number', 'central registration system number',
+  'economic register number (cbls)', 'folio mercantil no.', 'matricula mercantil no', 'r.f.c.', 'v.a.t. number',
+  'identification number', 'd-u-n-s number',
+].sort((a, b) => b.length - a.length).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+const ID_PART = new RegExp(`^(?:alt\\.\\s+)?(${ID_LABELS.join('|')})\\s*:?\\s*(.+?)\\s*(?:\\(([^)]*)\\))?$`, 'i');
+export const normId = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+export function companyIds(entry) {
+  const out = [];
+  for (const part of String(entry?.remarks || '').split(';').map((p) => p.trim()).filter(Boolean)) {
+    const m = ID_PART.exec(part.replace(/\.$/, ''));
+    if (!m) continue;
+    for (const value of m[2].split(/,\s*/)) {
+      const v = value.trim();
+      if (/\d/.test(v) && normId(v).length >= 3) out.push({ label: m[1], value: v, country: m[3] || null });
+    }
+  }
+  return out;
+}
+
+// "same" when the vendor's registration or license number is one the entry gives, "differs" when the
+// entry gives numbers and none is the vendor's, null when either side has none.
+export function compareRegistration(registrationNumber, entry) {
+  const mine = normId(registrationNumber);
+  const ids = companyIds(entry);
+  if (!mine || !ids.length) return { ids, registrationCompared: null };
+  return { ids, registrationCompared: ids.some((x) => normId(x.value) === mine) ? 'same' : 'differs' };
 }

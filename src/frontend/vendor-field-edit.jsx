@@ -13,6 +13,8 @@ const roleBox = xcss({ width: '130px' });
 const bornBox = xcss({ width: '150px' });
 const affix = xcss({ paddingInline: 'space.100' });
 const natBox = xcss({ width: '220px' });
+const addressBox = xcss({ width: '360px' });
+const regBox = xcss({ width: '200px' });
 const YEAR = /^\d{4}(-\d{2}-\d{2})?$/;
 
 // Keeps only rows with a name; a share is kept for owners and must be between 0 and 100; a year
@@ -25,7 +27,9 @@ function clean(v) {
       name: o.name, role: o.role, ...(o.role === 'owner' && Number.isFinite(o.share) && o.share >= 0 && o.share <= 100 ? { share: o.share } : {}),
       ...(YEAR.test(o.born) ? { born: o.born } : {}), ...(o.nationality ? { nationality: o.nationality } : {}),
     }));
-  return { ...(v.country ? { country: v.country } : {}), owners };
+  const address = String(v.address || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const registrationNumber = String(v.registrationNumber || '').trim().slice(0, 64);
+  return { ...(v.country ? { country: v.country } : {}), ...(address ? { address } : {}), ...(registrationNumber ? { registrationNumber } : {}), owners };
 }
 
 function VendorDetailsEdit() {
@@ -35,7 +39,7 @@ function VendorDetailsEdit() {
     view.getContext().then((c) => {
       const v = c?.extension?.fieldValue ?? c?.fieldValue ?? null;
       setCreateMode((c?.extension?.renderContext || '') === 'issue-create');
-      setValue({ country: v?.country || '', owners: (v?.owners || []).map((o) => ({ ...o, share: o.share ?? '', born: o.born ?? '', nationality: o.nationality || '' })) });
+      setValue({ country: v?.country || '', address: v?.address || '', registrationNumber: v?.registrationNumber || '', owners: (v?.owners || []).map((o) => ({ ...o, share: o.share ?? '', born: o.born ?? '', nationality: o.nationality || '' })) });
     });
   }, []);
   if (!value) return <Text>Loading</Text>;
@@ -49,6 +53,16 @@ function VendorDetailsEdit() {
           value={value.country ? { value: value.country, label: countryNameOf(value.country) || value.country } : null}
           onChange={(o) => update({ ...value, country: o?.value || '' })} />
       </Stack>
+      <Inline space="space.100" shouldWrap>
+        <Stack space="space.050">
+          <Label labelFor="vd-address">Registered address</Label>
+          <Box xcss={addressBox}><Textfield id="vd-address" placeholder="Street, city" value={value.address} onChange={(e) => update({ ...value, address: e.target.value })} /></Box>
+        </Stack>
+        <Stack space="space.050">
+          <Label labelFor="vd-reg">Registration or license number</Label>
+          <Box xcss={regBox}><Textfield id="vd-reg" value={value.registrationNumber} onChange={(e) => update({ ...value, registrationNumber: e.target.value })} /></Box>
+        </Stack>
+      </Inline>
       <Label labelFor="vd-owner-0">Owners and directors</Label>
       {value.owners.map((o, i) => (
         <Stack key={i} space="space.050">

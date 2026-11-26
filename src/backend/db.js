@@ -92,7 +92,10 @@ export const migrations = migrationRunner
   .enqueue('v014_cp_decision', 'ALTER TABLE counterparty ADD COLUMN decision VARCHAR(16)')
   .enqueue('v015_cp_decision_reason', 'ALTER TABLE counterparty ADD COLUMN decision_reason TEXT')
   .enqueue('v016_cp_decision_by', 'ALTER TABLE counterparty ADD COLUMN decision_by VARCHAR(128)')
-  .enqueue('v017_cp_decision_at', 'ALTER TABLE counterparty ADD COLUMN decision_at DATETIME');
+  .enqueue('v017_cp_decision_at', 'ALTER TABLE counterparty ADD COLUMN decision_at DATETIME')
+  // The company's registered address and its registration or license number, compared with a list entry's.
+  .enqueue('v018_cp_address', 'ALTER TABLE counterparty ADD COLUMN address TEXT')
+  .enqueue('v019_cp_reg_no', 'ALTER TABLE counterparty ADD COLUMN reg_no VARCHAR(64)');
 
 let migrated = false;
 export async function ensureSchema() {

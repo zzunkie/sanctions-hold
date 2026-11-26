@@ -1,7 +1,7 @@
 // Resolvers for the global page and the issue panel.
 import Resolver from '@forge/resolver';
 import api, { route } from '@forge/api';
-import { ensureSchema, q, iso, getSetting, setSetting } from './backend/db.js';
+import { ensureSchema, q, iso, getSetting, setSetting, logEvent } from './backend/db.js';
 import { listState } from './backend/lists.js';
 import {
   counts, listCounterparties, counterpartyView, reviewQueue, ruleCleared, reviewMatch, createCounterparty, updateCounterparty,
@@ -14,6 +14,7 @@ import { setProperty, listProjects } from './backend/jira.js';
 import { accuracyView } from './backend/accuracy.js';
 import { queueJob, jobState, push } from './jobs.js';
 import { nameFromSummary, detailsFromDescription } from './events.js';
+import { mayReview, assertReviewer, findGroups, isJiraAdmin } from './backend/reviewers.js';
 
 const resolver = new Resolver();
 const define = (name, fn) => resolver.define(name, async (req) => {
@@ -59,18 +60,25 @@ define('rescreenAll', async () => { await queueJob('rescreen', { reason: 'manual
 define('removeSample', async () => { await removeSample(); return {}; });
 
 define('reviewQueue', async () => ({ rows: await reviewQueue(), ruleCleared: await ruleCleared() }));
-define('review', async ({ counterpartyId, entryId, decision, reason }, ctx) => reviewMatch({ counterpartyId, entryId, decision, reason }, ctx.accountId));
-define('decideVendor', async ({ counterpartyId, decision, reason }, ctx) => decideCounterparty({ counterpartyId, decision, reason }, ctx.accountId));
+define('review', async ({ counterpartyId, entryId, decision, reason }, ctx) => {
+  await assertReviewer(ctx.accountId);
+  return reviewMatch({ counterpartyId, entryId, decision, reason }, ctx.accountId);
+});
+define('decideVendor', async ({ counterpartyId, decision, reason }, ctx) => {
+  await assertReviewer(ctx.accountId);
+  return decideCounterparty({ counterpartyId, decision, reason }, ctx.accountId);
+});
+define('reviewAccess', async (_, ctx) => mayReview(ctx.accountId));
 
 define('listCounterparties', async (p) => listCounterparties(p));
 define('getCounterparty', async ({ id }) => ({ view: await counterpartyView(id) }));
-define('addCounterparty', async ({ name, country, owners }, ctx) => {
-  const id = await createCounterparty({ name, country, owners, source: 'manual' }, ctx.accountId);
+define('addCounterparty', async ({ name, country, owners, address, registrationNumber }, ctx) => {
+  const id = await createCounterparty({ name, country, owners, address, registrationNumber, source: 'manual' }, ctx.accountId);
   await screenCounterparties([id], { actor: ctx.accountId, reason: 'added' });
   return { view: await counterpartyView(id) };
 });
-define('editCounterparty', async ({ id, name, country, owners }, ctx) => {
-  await updateCounterparty(id, { name, country, owners }, ctx.accountId);
+define('editCounterparty', async ({ id, name, country, owners, address, registrationNumber }, ctx) => {
+  await updateCounterparty(id, { name, country, owners, address, registrationNumber }, ctx.accountId);
   await screenCounterparties([id], { actor: ctx.accountId, reason: 'edited' });
   return { view: await counterpartyView(id) };
 });
@@ -107,7 +115,19 @@ define('listUpdates', async () => {
 define('accuracy', async () => accuracyView());
 define('runAccuracy', async () => { await queueJob('accuracy'); return {}; });
 
-define('getSettings', async () => ({ policy: await getPolicy(), projects: await getSetting('projects', []), available: await listProjects().catch(() => []) }));
+define('getSettings', async () => ({
+  policy: await getPolicy(), projects: await getSetting('projects', []), available: await listProjects().catch(() => []),
+  reviewers: await getSetting('reviewers', null), groups: await findGroups().catch(() => []),
+}));
+// Only a Jira admin chooses who decides possible matches.
+define('saveReviewers', async ({ group }, ctx) => {
+  if (!(await isJiraAdmin(ctx.accountId))) throw new Error('Only a Jira admin chooses who decides possible matches.');
+  const g = group?.groupId ? (await findGroups()).find((x) => x.groupId === group.groupId) : null;
+  if (group?.groupId && !g) throw new Error('That Jira group was not found.');
+  await setSetting('reviewers', g);
+  await logEvent({ type: 'reviewers_changed', detail: { group: g?.name || null }, actor: ctx.accountId });
+  return { reviewers: g };
+});
 define('saveSettings', async ({ threshold, projects, ownerRule, birthYearRule }, ctx) => {
   const t = Number(threshold);
   if (!(t >= 0.85 && t <= 0.98)) throw new Error('The threshold must be between 0.85 and 0.98.');
@@ -142,17 +162,18 @@ define('issueView', async ({ issueKey }) => {
   const f = await issueFields(issueKey);
   return { view: null, list: await listState(), suggestion: f ? { name: nameFromSummary(f.summary), ...detailsFromDescription(f.description) } : null };
 });
-define('issueSetVendor', async ({ issueKey, name, country, owners }, ctx) => {
+define('issueSetVendor', async ({ issueKey, name, country, owners, address, registrationNumber }, ctx) => {
   const cp = await byIssue(issueKey);
   let id = cp?.id;
-  if (cp) await updateCounterparty(cp.id, { name, country, owners }, ctx.accountId);
+  if (cp) await updateCounterparty(cp.id, { name, country, owners, address, registrationNumber }, ctx.accountId);
   else {
-    id = await createCounterparty({ name, country, owners, issueKey, source: 'jira' }, ctx.accountId);
+    id = await createCounterparty({ name, country, owners, address, registrationNumber, issueKey, source: 'jira' }, ctx.accountId);
     await setProperty(issueKey, CP_PROPERTY, { counterpartyId: id }).catch(() => null);
   }
   await screenCounterparties([id], { actor: ctx.accountId, reason: cp ? 'edited in panel' : 'added in panel' });
-  await setVendorField(issueKey, { country, owners }).catch((e) => console.error('vendor field', e.message));
-  return { view: await counterpartyView(id) };
+  const view = await counterpartyView(id);
+  await setVendorField(issueKey, { country, owners, address: view.counterparty.address, registrationNumber: view.counterparty.registrationNumber }).catch((e) => console.error('vendor field', e.message));
+  return { view };
 });
 
 export const handler = resolver.getDefinitions();

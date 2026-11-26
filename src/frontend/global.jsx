@@ -133,6 +133,7 @@ const EVENT_TEXT = {
   screened_by_tool: 'Screened by an agent',
   counterparty_added: 'Request opened by an agent',
   review_note_added: 'Review notes added by an agent',
+  reviewers_changed: 'Reviewer group changed',
 };
 // Agent events name the surface that called the tool.
 const VIA = { rovo: 'the Rovo agent', mcp: 'an MCP client' };
@@ -264,7 +265,7 @@ function ReviewQueue({ onChange, stamp }) {
     <Stack space="space.200">
       {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
-        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
+        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country, or nationality and year of birth (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
@@ -403,6 +404,7 @@ function Vendors({ onChange, stamp }) {
   };
   return (
     <Stack space="space.300">
+      <Text color="color.text.subtle">Every vendor Sanctions Hold screens: from onboarding work items, the Rovo agent, MCP clients and CSV imports. All of them are screened again after each list update.</Text>
       <Inline space="space.150" alignBlock="end" shouldWrap>
         <Stack space="space.050"><Label labelFor="search">Search name, owner or work item</Label><Box xcss={narrow}><Textfield id="search" onChange={(e) => setSearch(e.target.value)} /></Box></Stack>
         <Button onClick={() => setTerm(search)}>Search</Button>
@@ -432,7 +434,7 @@ function Vendors({ onChange, stamp }) {
       <Heading size="small">Add a vendor</Heading>
       <VendorForm submitLabel="Add and screen" onSubmit={async (v) => { const r = await call('addCounterparty', v); setOpen(r.view.counterparty.id); list.reload(); onChange(); }} />
       <Heading size="small">Import vendors</Heading>
-      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"). Every vendor is screened right after the import.</Text>
+      <Text color="color.text.subtle">CSV columns: name, country (2 letters), owners and directors separated by ; (for example "Ali Kalhor 60%; Sara Haddad director"), and optionally the registered address and the registration or license number. Every vendor is screened right after the import.</Text>
       <Box xcss={narrow}><FilePicker label="Vendor CSV" onChange={upload} /></Box>
       {msg ? <SectionMessage appearance={msg.appearance}><Text>{msg.text}</Text></SectionMessage> : null}
       <ModalTransition>{open ? <VendorModal id={open} onClose={(changed) => { setOpen(null); if (changed) { list.reload(); onChange(); } }} /> : null}</ModalTransition>
@@ -512,8 +514,8 @@ function AccuracyTable({ runs }) {
       rows={[
         ...kinds.map((k) => ({ key: k, cells: [{ key: 'k', content: KIND[k] }, ...cells(k, (r) => r.positives[k] && { n: r.positives[k].n, f: r.positives[k].found })] })),
         { key: 'all', cells: [{ key: 'k', content: <Strong>All list-name queries (recall)</Strong> }, ...cells('all', (r) => ({ n: r.total.n, f: r.total.found }), true)] },
-        { key: 'neg', cells: [{ key: 'k', content: <Strong>Real company names not on the lists, flagged (false positives)</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
-        { key: 'ppl', cells: [{ key: 'k', content: <Strong>Real person names not on the lists, flagged (false positives)</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
+        { key: 'neg', cells: [{ key: 'k', content: <Strong>{`Real company names not on the lists, flagged (false positives${runs.length > 1 ? '; the same names in both runs' : ''})`}</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
+        { key: 'ppl', cells: [{ key: 'k', content: <Strong>{`Real person names not on the lists, flagged (false positives${runs.length > 1 ? '; the same names in both runs' : ''})`}</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
         ...(runs.some(({ r }) => r.peopleAfterBirthYearRule) ? [{ key: 'ppl-year', cells: [{ key: 'k', content: 'The same people, with the year-of-birth rule on (see Settings)' }, ...cells('ppl-year', (r) => r.people && r.peopleAfterBirthYearRule && { n: r.people.n, f: r.peopleAfterBirthYearRule.left })] }] : []),
       ]}
     />
@@ -584,7 +586,12 @@ function Settings({ onChange, onRemoved, stamp }) {
   const save = async (patch) => {
     try { await call('saveSettings', { threshold: data.policy.threshold, ownerRule: data.policy.ownerRule, birthYearRule: data.policy.birthYearRule, ...patch }); setMsg({ appearance: 'success', text: 'Saved. Every vendor is screened again with the new setting.' }); reload(); onChange(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
   };
+  const saveReviewers = async (groupId) => {
+    try { await call('saveReviewers', { group: groupId ? { groupId } : null }); setMsg({ appearance: 'success', text: groupId ? 'Saved. Only members of that group decide possible matches.' : 'Saved. Anyone who can open the work item decides possible matches.' }); reload(); } catch (e) { setMsg({ appearance: 'error', text: e.message }); }
+  };
   if (loading || !data) return <Spinner label="Loading settings" />;
+  const anyone = { label: 'Anyone who can open the work item', value: '' };
+  const groupOptions = [anyone, ...(data.groups || []).map((g) => ({ label: g.name, value: g.groupId }))];
   const current = THRESHOLDS.find((t) => t.value === data.policy.threshold) || { value: data.policy.threshold, label: String(data.policy.threshold) };
   return (
     <Stack space="space.300">
@@ -600,8 +607,13 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Year of birth</Heading>
-        <Text color="color.text.subtle">With the rule on, a possible match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. The audit record and the work item note each match the rule cleared, and the match comes back for review if the year of birth or the list entry changes.</Text>
+        <Text color="color.text.subtle">With the rule on, a possible match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. A range of years on the entry counts as every year in it, and a circa year as two years either side. The audit record and the work item note each match the rule cleared, and the match comes back for review if the year of birth or the list entry changes.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
+      </Stack>
+      <Stack space="space.100">
+        <Heading size="small">Who decides possible matches</Heading>
+        <Text color="color.text.subtle">With a Jira group chosen, only its members decide possible matches and listed minority owners or directors, so the person who requests a vendor does not clear it. Everyone else sees the evidence. Only a Jira admin can change this setting.</Text>
+        <Box xcss={xcss({ width: '480px' })}><Select inputId="reviewers" value={data.reviewers ? { label: data.reviewers.name, value: data.reviewers.groupId } : anyone} options={groupOptions} onChange={(o) => o && saveReviewers(o.value)} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Projects screened automatically</Heading>
@@ -613,7 +625,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Audit record</Heading>
-        <Text color="color.text.subtle">Every screening, possible match, reviewer decision with its reason, blocked approval, approval and list update, with the list publication it used.</Text>
+        <Text color="color.text.subtle">Every screening, possible match, reviewer decision with its reason, blocked approval, approval, list update and change of the reviewer group, with the list publication it used.</Text>
         <Inline><Button isLoading={busy === 'audit'} onClick={async () => { setBusy('audit'); try { setAudit((await call('auditCsv', { days: 90 })).csv); } finally { setBusy(null); } }}>Build the CSV for the last 90 days</Button></Inline>
         {audit ? <CodeBlock language="text" shouldWrapLongLines text={audit} /> : null}
       </Stack>

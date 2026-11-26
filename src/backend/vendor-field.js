@@ -1,10 +1,11 @@
 // The "Vendor details" Forge custom field: the vendor's country and its owners and directors with
-// their shares, entered on the onboarding work item. Its value is { country, owners: [{ name, role, share, born, nationality }] }.
+// their shares, entered on the onboarding work item. Its value is
+// { country, address, registrationNumber, owners: [{ name, role, share, born, nationality }] }.
 import { route } from '@forge/api';
 import { jira } from './jira.js';
 import { ownerList, ownerStrings } from '../core/owners.js';
 
-const MODULE = '/static/vendor-details-field';
+const MODULE = '/static/vendor-record';
 let cachedId = null;
 
 export async function vendorFieldId() {
@@ -15,8 +16,10 @@ export async function vendorFieldId() {
   return cachedId;
 }
 
-export const fieldValue = ({ country, owners }) => ({
+export const fieldValue = ({ country, owners, address, registrationNumber }) => ({
   ...(country ? { country: String(country).toUpperCase().slice(0, 2) } : {}),
+  ...(address ? { address: String(address).slice(0, 300) } : {}),
+  ...(registrationNumber ? { registrationNumber: String(registrationNumber).slice(0, 64) } : {}),
   owners: ownerList(owners).map((o) => ({
     name: o.name, role: o.role, ...(o.role === 'owner' && o.share != null ? { share: o.share } : {}),
     ...(o.born ? { born: o.born } : {}), ...(o.nationality ? { nationality: o.nationality } : {}),
@@ -24,7 +27,7 @@ export const fieldValue = ({ country, owners }) => ({
 });
 
 export const detailsFromField = (v) => (v && typeof v === 'object'
-  ? { country: v.country || null, owners: ownerStrings(v.owners || []) }
+  ? { country: v.country || null, owners: ownerStrings(v.owners || []), address: v.address || null, registrationNumber: v.registrationNumber || null }
   : null);
 
 export async function setVendorField(issueKey, details) {

@@ -58,7 +58,8 @@ export function demoVendors(now = Date.now()) {
   return [
     {
       key: 'd-typo', name: 'Dexterus Global DMCC', country: 'AE', owners: ['Rashid Al Mansoori (100%)'], approvedAt: null, request: true,
-      note: 'Spelling variant of a name on the SDN list.',
+      address: 'Unit 226, Jewellery and Gemplex 2, DMCC Business Centre, Dubai', registrationNumber: 'DMCC-762188',
+      note: 'Spelling variant of a name on the SDN list, with the license number that entry gives.',
     },
     {
       key: 'd-owner', name: 'Crescent Bay Marine Services FZE', country: 'AE', owners: ['Ali Kalhor (60%, born 1963, nationality Iran)', 'Sara Haddad (40%)'], approvedAt: null, request: true,
@@ -66,6 +67,7 @@ export function demoVendors(now = Date.now()) {
     },
     {
       key: 'd-near', name: 'Atlis Shipping Pte. Ltd.', country: 'SG', owners: ['Tan Wei Ming (70%)', 'Lim Siew Ling (30%)'], approvedAt: null, request: true,
+      address: '71 Robinson Road, Singapore', registrationNumber: '201934517K',
       note: 'Close to a list alias but a different company.',
     },
     {
@@ -74,7 +76,8 @@ export function demoVendors(now = Date.now()) {
     },
     {
       key: 'd-later', name: 'Nordic International Trading L.L.C.', country: 'AE', owners: [], approvedAt: new Date(now - 64 * DAY).toISOString(), request: true,
-      note: 'Approved before its designation; the replayed list update matches it.',
+      address: 'Al Murar, Deira, Dubai', registrationNumber: '1066766',
+      note: 'Approved before its designation; the replayed list update matches it, license number included.',
     },
     {
       key: 'd-minority', name: 'Lakshmi Polymers Pvt. Ltd.', country: 'IN', owners: ['Meera Iyer (80%)', 'Suniel Kumar Sharma (20%, born 1979, nationality India)'], approvedAt: null, request: true,
@@ -86,7 +89,7 @@ export function demoVendors(now = Date.now()) {
     },
     {
       key: 'd-namesake', name: 'Savannah Freight Ltd', country: 'KE', owners: ['Yusuf Ibrahim (100%, born 1990, nationality Kenya)'], approvedAt: null, request: true,
-      note: 'The owner shares a common name with two listed people; his year of birth and nationality differ from both, so a reviewer dismisses them.',
+      note: 'The owner shares a common name with two listed people; the owner\'s year of birth and nationality differ from both, so a reviewer dismisses them.',
     },
     {
       key: 'd-eu', name: 'Klaipeda Machine Parts UAB', country: 'LT', owners: ['Ruta Petrauskiene (45%)', 'Konstantin Nikolayev (30%, born 1971, nationality Russia)', 'Sergey Atlivanchik (25%, born 1980, nationality Russia)'], approvedAt: null, request: true,
@@ -94,7 +97,8 @@ export function demoVendors(now = Date.now()) {
     },
     {
       key: 'd-later-us', name: 'Berkeley Trading LLC', country: 'US', owners: [], approvedAt: new Date(now - 210 * DAY).toISOString(),
-      note: 'Same name as a later designation in another country.',
+      address: '1500 Market Street, Philadelphia, PA', registrationNumber: 'PA-7316652',
+      note: 'Same name as a later designation in another country, with a different registration number.',
     },
   ];
 }

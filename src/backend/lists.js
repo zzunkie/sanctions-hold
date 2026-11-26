@@ -36,7 +36,8 @@ async function ofacPublication() {
   const modified = head?.ok ? head.headers.get('last-modified') : null;
   const updated = modified ? new Date(modified).toISOString().slice(0, 10) : m?.[1] || null;
   // Files can be replaced inside the same publication path, so the modification time is part of the id.
-  if (m) return { id: hash16(`${m[2]}|${modified || ''}`), published: updated };
+  // When HEAD fails the id is unknown (null) and the hourly check skips OFAC that hour.
+  if (m) return { id: head?.ok ? hash16(`${m[2]}|${modified || ''}`) : null, published: updated };
   if (!head?.ok) throw new Error(`OFAC SDN.CSV: HTTP ${head?.status || res.status}`);
   return { id: hash16(head.headers.get('digest') || modified || ''), published: updated };
 }
@@ -50,7 +51,8 @@ async function ukPublication() {
 }
 
 // The EU publishes a small RSS feed with the file's checksum; the file itself answers HEAD with its
-// modification time and length when the feed cannot be read.
+// modification time when the feed cannot be read. Without the feed the id is unknown (null), so the
+// hourly check skips the EU that hour instead of comparing a different kind of id.
 async function euPublication() {
   const rss = await fetch(EU_RSS).then((r) => (r.ok ? r.text() : null)).catch(() => null);
   const item = parseEuRss(rss);
@@ -58,12 +60,13 @@ async function euPublication() {
   const head = await fetch(EU_URL, { method: 'HEAD' });
   if (!head.ok) throw new Error(`EU consolidated list: HTTP ${head.status}`);
   const modified = head.headers.get('last-modified');
-  return { id: `${modified || ''}|${head.headers.get('content-length') || ''}`, published: modified ? new Date(modified).toISOString().slice(0, 10) : null, url: EU_URL };
+  return { id: null, published: modified ? new Date(modified).toISOString().slice(0, 10) : null, url: EU_URL };
 }
 
 export async function currentPublication() {
   const [ofac, uk, eu] = await Promise.all([ofacPublication(), ukPublication(), euPublication()]);
-  return { id: hash16(`${ofac.id}|${uk.id}|${eu.id}`), published: ofac.published, ukPublished: uk.published, euPublished: eu.published, euUrl: eu.url };
+  const parts = { ofac: ofac.id, uk: uk.id || null, eu: eu.id };
+  return { id: hash16(`${ofac.id}|${uk.id}|${eu.id}`), parts, published: ofac.published, ukPublished: uk.published, euPublished: eu.published, euUrl: eu.url };
 }
 
 async function downloadUk() {
@@ -134,7 +137,7 @@ export async function importLists({ reason = 'update', holdBackFrom = null } = {
   await q('INSERT INTO list_version (id, published, fetched_at, entries, added, removed, changed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE fetched_at = VALUES(fetched_at)',
     version, published, now, records.length, initial ? 0 : added.length, removed.length, changed.length, note);
   const state = {
-    version, published, ukPublished: pub.ukPublished, euPublished: pub.euPublished, digest, entries: records.length,
+    version, published, ukPublished: pub.ukPublished, euPublished: pub.euPublished, digest, parts: pub.parts, entries: records.length,
     ofacEntries: records.length - ukCount - euCount, ukEntries: ukCount, euEntries: euCount,
     fetchedAt: new Date().toISOString(), holdBackFrom: holdBackFrom || null, lists: [...Object.keys(LISTS), 'UK', 'EU'],
   };
@@ -143,13 +146,15 @@ export async function importLists({ reason = 'update', holdBackFrom = null } = {
   return { ...state, added: initial ? 0 : added.length, changed: changed.length, removed: removed.length, initial };
 }
 
-// Hourly: import only when OFAC, the UK or the EU published a new version.
+// Hourly: import only when OFAC, the UK or the EU published a new version. Each list is compared on
+// its own, and a list whose id could not be read this hour is left out of the comparison.
 export async function checkForUpdate() {
   const state = await listState();
   if (!state) return { changed: false, reason: 'not loaded' };
   const pub = await currentPublication();
   const digest = pub.id;
-  await setSetting('listCheck', { at: new Date().toISOString(), digest, published: pub.published, ukPublished: pub.ukPublished, euPublished: pub.euPublished });
-  if (digest === state.digest) return { changed: false };
-  return { changed: true };
+  await setSetting('listCheck', { at: new Date().toISOString(), digest, parts: pub.parts, published: pub.published, ukPublished: pub.ukPublished, euPublished: pub.euPublished });
+  if (!state.parts) return { changed: digest !== state.digest };
+  const changed = Object.entries(pub.parts).filter(([list, id]) => id && id !== state.parts[list]).map(([list]) => list);
+  return { changed: changed.length > 0, lists: changed };
 }

@@ -46,10 +46,11 @@ modules:
         jiraExpression: "issue.properties['sanctions-hold-counterparty'] != null"
 
   jira:customField:
-    - key: vendor-details-field
+    - key: vendor-record
       name: Vendor details
-      description: Country, owners and directors of the vendor, with an owner's year of birth and
-        nationality when known, screened by Sanctions Hold against the OFAC, UK and EU sanctions lists.
+      description: Country, address, registration number, owners and directors of the vendor, with an
+        owner's year of birth and nationality when known, screened by Sanctions Hold against the OFAC,
+        UK and EU sanctions lists.
       type: object
       schema:
         type: object
@@ -57,6 +58,12 @@ modules:
           country:
             type: string
             maxLength: 2
+          address:
+            type: string
+            maxLength: 300
+          registrationNumber:
+            type: string
+            maxLength: 64
           owners:
             type: array
             items:
@@ -81,7 +88,7 @@ modules:
         resource: vendor-field
         render: native
         formatter:
-          expression: "value == null ? '' : (value.country != null ? value.country + ' · ' : '') + (value.owners != null ? value.owners.map(o => (o.role == 'director' ? `${o.name} (director)` : (o.share != null ? `${o.name} (${o.share}%)` : o.name)) + (o.born != null ? `, born ${o.born}` : '') + (o.nationality != null ? `, ${o.nationality}` : '')).join('; ') : '')"
+          expression: "value == null ? '' : (value.country != null ? value.country + ' · ' : '') + (value.address != null ? value.address + ' · ' : '') + (value.registrationNumber != null ? 'Registration ' + value.registrationNumber + ' · ' : '') + (value.owners != null ? value.owners.map(o => (o.role == 'director' ? `${o.name} (director)` : (o.share != null ? `${o.name} (${o.share}%)` : o.name)) + (o.born != null ? `, born ${o.born}` : '') + (o.nationality != null ? `, ${o.nationality}` : '')).join('; ') : '')"
           export: true
         experience:
           - issue-view
@@ -239,7 +246,7 @@ modules:
       function: act-request
       actionVerb: CREATE
       description: >-
-        Opens a vendor onboarding work item in Jira for a company that is not known yet, with its country and owners, and screens it at once. Approval then waits for the Jira reviewers. Use after screen-counterparty when the user wants to go ahead.
+        Opens a vendor onboarding work item in Jira for a new company, with its country, address, registration number and owners, and screens it at once. A possible match holds approval for review. Use after screen-counterparty when the user wants to go ahead.
       inputs:
         name:
           title: Legal name
@@ -251,6 +258,16 @@ modules:
           type: string
           required: false
           description: Country of registration, as a name or a two-letter code
+        address:
+          title: Registered address
+          type: string
+          required: false
+          description: The company's registered address, when known
+        registrationNumber:
+          title: Registration number
+          type: string
+          required: false
+          description: The company's registration or trade license number, when known
         owners:
           title: Owners and directors
           type: string
@@ -268,7 +285,7 @@ modules:
       function: act-evidence
       actionVerb: GET
       description: >-
-        Each match of a vendor in Sanctions Hold with the full list entry (aliases, dates of birth, nationality, addresses, remarks) next to the owner or company it was found for, and whether birth year and nationality agree. Use it to prepare review notes.
+        Each match of a vendor with the full list entry (aliases, dates of birth, nationality, addresses, registration numbers, remarks) beside the owner or company it matched, and whether birth year, nationality, country or registration agree.
       inputs:
         counterparty:
           title: Vendor name or work item

@@ -10,24 +10,29 @@ import { syncWorkItem } from './screening.js';
 const clean = (s, n = 400) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const country = (c) => clean(c, 8).toUpperCase() || null;
 const owners = (o) => ownerStrings(o).map((s) => clean(s, 200));
+const address = (a) => clean(a, 300) || null;
+const regNo = (r) => clean(r, 64) || null;
 const policy = async () => ({ threshold: 0.92, ownerRule: 'fifty', birthYearRule: false, ...(await getSetting('policy', {})) });
 
-export async function createCounterparty({ name, country: c, owners: o, issueKey = null, source, approvedAt = null }, actor = null) {
+export async function createCounterparty({ name, country: c, owners: o, address: a = null, registrationNumber: r = null, issueKey = null, source, approvedAt = null }, actor = null) {
   const id = crypto.randomUUID();
   const n = clean(name);
   if (!n) throw new Error('A vendor needs a legal name.');
-  await q(`INSERT INTO counterparty (id, name, country, owners, issue_key, source, status, approved_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'unscreened', ?, ?)`, id, n, country(c), JSON.stringify(owners(o)), issueKey, source, dt(approvedAt), nowDt());
-  await logEvent({ counterpartyId: id, issueKey, type: 'counterparty_added', detail: { name: n, country: country(c), owners: owners(o), source }, actor });
+  await q(`INSERT INTO counterparty (id, name, country, owners, address, reg_no, issue_key, source, status, approved_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unscreened', ?, ?)`, id, n, country(c), JSON.stringify(owners(o)), address(a), regNo(r), issueKey, source, dt(approvedAt), nowDt());
+  await logEvent({ counterpartyId: id, issueKey, type: 'counterparty_added', detail: { name: n, country: country(c), owners: owners(o), address: address(a), registrationNumber: regNo(r), source }, actor });
   return id;
 }
 
-export async function updateCounterparty(id, { name, country: c, owners: o }, actor = null) {
+// An address or registration number left undefined keeps the stored one.
+export async function updateCounterparty(id, { name, country: c, owners: o, address: a, registrationNumber: r }, actor = null) {
   const n = clean(name);
   if (!n) throw new Error('A vendor needs a legal name.');
   // A changed owner list can change what a confirmed listed owner means, so an earlier proceed/block decision is cleared.
   await q('UPDATE counterparty SET name = ?, country = ?, owners = ?, decision = NULL, decision_reason = NULL WHERE id = ?', n, country(c), JSON.stringify(owners(o)), id);
-  await logEvent({ counterpartyId: id, type: 'counterparty_edited', detail: { name: n, country: country(c), owners: owners(o) }, actor });
+  if (a !== undefined) await q('UPDATE counterparty SET address = ? WHERE id = ?', address(a), id);
+  if (r !== undefined) await q('UPDATE counterparty SET reg_no = ? WHERE id = ?', regNo(r), id);
+  await logEvent({ counterpartyId: id, type: 'counterparty_edited', detail: { name: n, country: country(c), owners: owners(o), ...(a !== undefined ? { address: address(a) } : {}), ...(r !== undefined ? { registrationNumber: regNo(r) } : {}) }, actor });
 }
 
 export async function byIssue(issueKey) {
@@ -39,6 +44,7 @@ const shapeCp = (cp) => ({
   ...cp,
   owners: JSON.parse(cp.owners || '[]'),
   ownerDetails: ownerList(cp.owners),
+  registrationNumber: cp.reg_no || null,
   decision_at: iso(cp.decision_at),
   approved_at: iso(cp.approved_at),
   screened_at: iso(cp.screened_at),
@@ -173,28 +179,28 @@ export async function listCounterparties({ status = null, search = '', limit = 1
 }
 
 // Possible matches waiting for a reviewer, with the list entry behind each.
-const queueRows = async (where, order) => (await q(`SELECT h.*, c.name AS cp_name, c.country AS cp_country, c.owners AS cp_owners, c.issue_key, c.approved_at, e.list, e.ent_num, e.name AS entry_name, e.kind,
+const queueRows = async (where, order) => (await q(`SELECT h.*, c.name AS cp_name, c.country AS cp_country, c.owners AS cp_owners, c.address AS cp_address, c.reg_no AS cp_reg_no, c.issue_key, c.approved_at, e.list, e.ent_num, e.name AS entry_name, e.kind,
                                e.programs, e.countries, e.title, e.remarks, e.aliases, e.addresses, e.active AS entry_active
                         FROM hit h JOIN counterparty c ON c.id = h.counterparty_id LEFT JOIN list_entry e ON e.entry_id = h.entry_id
                         WHERE ${where} AND h.active = 1 ORDER BY ${order} LIMIT 200`))
-  .map((r) => ({ ...shapeHit(r), counterparty: { id: r.counterparty_id, name: r.cp_name, country: r.cp_country, owners: JSON.parse(r.cp_owners || '[]'), issueKey: r.issue_key, approvedAt: iso(r.approved_at) } }));
+  .map((r) => ({ ...shapeHit(r), counterparty: { id: r.counterparty_id, name: r.cp_name, country: r.cp_country, owners: JSON.parse(r.cp_owners || '[]'), address: r.cp_address || null, registrationNumber: r.cp_reg_no || null, issueKey: r.issue_key, approvedAt: iso(r.approved_at) } }));
 
 export const reviewQueue = () => queueRows("h.status = 'pending'", 'c.approved_at IS NULL, h.found_at DESC, h.score DESC');
 
 // Matches the year-of-birth rule cleared, for a reviewer to check, for example when a year of birth was typed wrong.
 export const ruleCleared = () => queueRows("h.status = 'dismissed' AND h.reviewed_by = 'rule:birth-year'", 'h.reviewed_at DESC');
 
-// CSV: name, country, owners (owners separated by ";"). A header row is optional.
+// CSV: name, country, owners (owners separated by ";"), and optionally address and registration number. A header row is optional.
 export async function importCsv(text, actor) {
   const rows = parseCsv(text).filter((r) => r.some((c) => String(c).trim()));
   if (rows.length && /^(name|vendor|legal)/i.test(String(rows[0][0]).trim())) rows.shift();
-  const list = rows.map((r) => ({ name: clean(r[0]), country: country(r[1]), owners: owners(r[2]) })).filter((r) => r.name);
+  const list = rows.map((r) => ({ name: clean(r[0]), country: country(r[1]), owners: owners(r[2]), address: address(r[3]), regNo: regNo(r[4]) })).filter((r) => r.name);
   if (!list.length) throw new Error('No vendor names found. Columns: name, country, owners.');
   if (list.length > 5000) throw new Error('Up to 5,000 vendors per file.');
   const now = nowDt();
   const ids = list.map(() => crypto.randomUUID());
-  await insertMany('counterparty', ['id', 'name', 'country', 'owners', 'issue_key', 'source', 'status', 'approved_at', 'created_at'],
-    list.map((r, i) => [ids[i], r.name, r.country, JSON.stringify(r.owners), null, 'csv', 'unscreened', null, now]));
+  await insertMany('counterparty', ['id', 'name', 'country', 'owners', 'address', 'reg_no', 'issue_key', 'source', 'status', 'approved_at', 'created_at'],
+    list.map((r, i) => [ids[i], r.name, r.country, JSON.stringify(r.owners), r.address, r.regNo, null, 'csv', 'unscreened', null, now]));
   await logEvent({ type: 'counterparties_imported', detail: { count: list.length }, actor });
   return ids;
 }
@@ -204,8 +210,8 @@ export async function loadSample() {
   if (Number(n)) return { loaded: 0 };
   const list = sampleVendors();
   const now = nowDt();
-  await insertMany('counterparty', ['id', 'name', 'country', 'owners', 'issue_key', 'source', 'status', 'approved_at', 'created_at'],
-    list.map((v) => [`sample-${v.key}`, v.name, v.country, JSON.stringify(v.owners), null, 'sample', 'unscreened', dt(v.approvedAt), now]));
+  await insertMany('counterparty', ['id', 'name', 'country', 'owners', 'address', 'reg_no', 'issue_key', 'source', 'status', 'approved_at', 'created_at'],
+    list.map((v) => [`sample-${v.key}`, v.name, v.country, JSON.stringify(v.owners), v.address || null, v.registrationNumber || null, null, 'sample', 'unscreened', dt(v.approvedAt), now]));
   await logEvent({ type: 'sample_loaded', detail: { count: list.length }, actor: 'app' });
   return { loaded: list.length };
 }
