@@ -46,7 +46,7 @@ modules:
         jiraExpression: "issue.properties['sanctions-hold-counterparty'] != null"
 
   jira:customField:
-    - key: vendor-details
+    - key: vendor-details-field
       name: Vendor details
       description: Country, owners and directors of the vendor, with an owner's year of birth and
         nationality when known, screened by Sanctions Hold against the OFAC, UK and EU sanctions lists.

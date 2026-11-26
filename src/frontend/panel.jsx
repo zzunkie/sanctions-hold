@@ -50,7 +50,10 @@ function Panel() {
       <Inline><Button appearance="primary" isLoading={busy} onClick={save}>{cp ? 'Save and screen again' : 'Screen this vendor'}</Button></Inline>
     </Stack>
   ) : null;
-  const note = STATUS_NOTE[view?.assessment?.reason];
+  const byRule = (view?.hits || []).some((h) => h.active && h.status === 'dismissed' && h.reviewedBy === 'rule:birth-year');
+  const note = view?.assessment?.reason === 'dismissed' && byRule
+    ? 'Every possible match was dismissed by a reviewer or cleared by the year-of-birth rule. The vendor can be approved.'
+    : STATUS_NOTE[view?.assessment?.reason];
   return (
     <Stack space="space.200">
       {error ? <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage> : null}

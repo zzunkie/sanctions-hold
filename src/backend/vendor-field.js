@@ -4,7 +4,7 @@ import { route } from '@forge/api';
 import { jira } from './jira.js';
 import { ownerList, ownerStrings } from '../core/owners.js';
 
-const MODULE = '/static/vendor-details';
+const MODULE = '/static/vendor-details-field';
 let cachedId = null;
 
 export async function vendorFieldId() {

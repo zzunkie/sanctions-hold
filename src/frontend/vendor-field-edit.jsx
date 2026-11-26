@@ -4,7 +4,8 @@ import { CustomFieldEdit } from '@forge/react/jira';
 import { view } from '@forge/bridge';
 import { COUNTRIES, countryNameOf } from '../core/countries.js';
 
-const COUNTRY_OPTIONS = COUNTRIES.map(([value, label]) => ({ value, label }));
+// UK is kept as an alias of GB for lookups; the picker lists the United Kingdom once.
+const COUNTRY_OPTIONS = COUNTRIES.filter(([value]) => value !== 'UK').map(([value, label]) => ({ value, label }));
 const ROLE_OPTIONS = [{ value: 'owner', label: 'Owner' }, { value: 'director', label: 'Director' }];
 const nameBox = xcss({ width: '220px' });
 const shareBox = xcss({ width: '96px' });

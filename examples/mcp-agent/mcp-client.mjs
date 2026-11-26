@@ -27,7 +27,7 @@ const shortList = (l) => ({ 'UK Sanctions List': 'UK', 'EU Consolidated Financia
 // The lines worth reading on screen for each tool, after its answer.
 export function details(tool, r) {
   if (tool.startsWith('screen-counterparty')) {
-    return (r.matches || []).map((m) => `• ${m.screenedName || m.foundFor?.owner || ''} ~ ${m.name}, ${shortList(m.list)}${m.euReferenceNumber ? ` ${m.euReferenceNumber}` : ''}, ${m.reviewed || m.review || ''}`);
+    return (r.matches || []).map((m) => `• ${m.screenedName || m.foundFor?.owner || ''} ~ ${[m.name, `${shortList(m.list)}${m.euReferenceNumber ? ` ${m.euReferenceNumber}` : ''}`, m.reviewed || m.review].filter(Boolean).join(', ')}`);
   }
   if (tool.startsWith('match-evidence')) {
     return (r.matches || []).map((m) => `• ${m.foundFor?.owner || r.name} ~ ${m.name}: year of birth ${m.compared?.yearOfBirth || 'not compared'}, nationality ${m.compared?.nationality || 'not compared'}${m.review && m.review !== 'waiting for review' ? ` (${m.review})` : ''}`);

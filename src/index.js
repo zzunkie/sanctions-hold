@@ -4,7 +4,7 @@ import api, { route } from '@forge/api';
 import { ensureSchema, q, iso, getSetting, setSetting } from './backend/db.js';
 import { listState } from './backend/lists.js';
 import {
-  counts, listCounterparties, counterpartyView, reviewQueue, reviewMatch, createCounterparty, updateCounterparty,
+  counts, listCounterparties, counterpartyView, reviewQueue, ruleCleared, reviewMatch, createCounterparty, updateCounterparty,
   byIssue, importCsv, removeSample, auditCsv, decideCounterparty,
 } from './backend/counterparties.js';
 import { setVendorField } from './backend/vendor-field.js';
@@ -58,7 +58,7 @@ define('replayDesignations', async () => {
 define('rescreenAll', async () => { await queueJob('rescreen', { reason: 'manual' }); return {}; });
 define('removeSample', async () => { await removeSample(); return {}; });
 
-define('reviewQueue', async () => ({ rows: await reviewQueue() }));
+define('reviewQueue', async () => ({ rows: await reviewQueue(), ruleCleared: await ruleCleared() }));
 define('review', async ({ counterpartyId, entryId, decision, reason }, ctx) => reviewMatch({ counterpartyId, entryId, decision, reason }, ctx.accountId));
 define('decideVendor', async ({ counterpartyId, decision, reason }, ctx) => decideCounterparty({ counterpartyId, decision, reason }, ctx.accountId));
 

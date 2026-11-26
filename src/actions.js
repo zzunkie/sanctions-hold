@@ -20,7 +20,7 @@ const text = (v, n = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0
 const trimStop = (v) => String(v ?? '').trim().replace(/[.\s]+$/, '');
 const STATUS_TEXT = {
   clear: 'no possible match on the lists as loaded; Sanctions Hold does not hold its approval',
-  cleared: 'every possible match was reviewed and dismissed, or a reviewer let a listed minority owner or director proceed; Sanctions Hold does not hold its approval',
+  cleared: 'every possible match was dismissed by a reviewer or cleared by the year-of-birth rule, or a reviewer let a listed minority owner or director proceed; Sanctions Hold does not hold its approval',
   review: 'a possible match or a reviewer decision is pending; approval is held',
   blocked: 'a reviewer confirmed a sanctions list match for this vendor or one of its owners; approval stays blocked in Jira',
   unscreened: 'not screened yet',
@@ -126,11 +126,14 @@ export async function counterpartyStatus(payload) {
   const v = await counterpartyView(rows[0].id);
   const cp = v.counterparty;
   const open = v.hits.filter((h) => h.status === 'confirmed' || (h.status === 'pending' && h.active));
-  const reviewed = v.hits.filter((h) => h.status === 'dismissed');
+  const byRule = (h) => h.reviewedBy === 'rule:birth-year';
+  const reviewed = v.hits.filter((h) => h.status === 'dismissed' && !byRule(h));
+  const ruleCleared = v.hits.filter((h) => h.status === 'dismissed' && byRule(h));
   const approval = v.events.find((e) => e.type === 'approved');
   const answer = `${cp.name}${cp.issue_key ? ` (${cp.issue_key})` : ''}: ${STATUS_TEXT[cp.status] || cp.status}.`
     + (open.length ? ` ${open.map((h) => (h.status === 'confirmed' ? `Confirmed: ${h.matchedName} (${trimStop(h.reason)})` : `Waiting for review: ${h.matchedName}, score ${Number(h.score).toFixed(2)}`)).join('; ')}.` : '')
-    + (reviewed.length ? ` Dismissed: ${reviewed.map((h) => `${h.matchedName} (${h.reviewedBy === 'rule:birth-year' ? 'year-of-birth rule: ' : ''}${trimStop(h.reason)})`).join('; ')}.` : '')
+    + (reviewed.length ? ` Dismissed: ${reviewed.map((h) => `${h.matchedName} (${trimStop(h.reason)})`).join('; ')}.` : '')
+    + (ruleCleared.length ? ` Cleared by the year-of-birth rule: ${ruleCleared.map((h) => `${h.matchedName} (${trimStop(h.reason)})`).join('; ')}.` : '')
     + (OWNERSHIP_REASONS.has(v.assessment?.reason) ? ` ${NEXT[v.assessment.reason]}` : '')
     + (cp.screened_at ? ` Last screened ${cp.screened_at.slice(0, 16).replace('T', ' ')} UTC.` : '');
   return {

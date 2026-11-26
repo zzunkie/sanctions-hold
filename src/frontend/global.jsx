@@ -228,7 +228,7 @@ function Overview({ data, reload, goReview }) {
 function ReviewModal({ hit, onClose }) {
   return (
     <Modal onClose={() => onClose(false)} width="large">
-      <ModalHeader><ModalTitle>{`${hit.counterparty.name}: possible match`}</ModalTitle></ModalHeader>
+      <ModalHeader><ModalTitle>{`${hit.counterparty.name}: ${hit.reviewedBy === 'rule:birth-year' && hit.status === 'dismissed' ? 'match cleared by the year-of-birth rule' : 'possible match'}`}</ModalTitle></ModalHeader>
       <ModalBody>
         <Stack space="space.200">
           <Inline space="space.100" alignBlock="center">
@@ -258,10 +258,11 @@ function ReviewQueue({ onChange, stamp }) {
   const [open, setOpen] = useState(null);
   if (loading && !data) return <Spinner label="Loading the review queue" />;
   if (error) return <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage>;
-  if (!data.rows.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
+  const cleared = data.ruleCleared || [];
+  if (!data.rows.length && !cleared.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
   return (
     <Stack space="space.200">
-      <Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
+      {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
         head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
@@ -277,7 +278,27 @@ function ReviewQueue({ onChange, stamp }) {
             { key: 'x', content: <Button onClick={() => setOpen(h)}>Review</Button> },
           ],
         }))}
-      />
+      /></> : <Text>No possible matches waiting for review.</Text>}
+      {cleared.length ? (
+        <Stack space="space.100">
+          <Heading size="small">Cleared by the year-of-birth rule</Heading>
+          <Text color="color.text.subtle">The owner's or director's year of birth is more than a year from every date of birth on the list entry. Open a match to confirm it as the same person if the year of birth on the vendor record is wrong.</Text>
+          <DynamicTable
+            head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'y', content: 'Years of birth' }, { key: 'd', content: 'Cleared' }, { key: 'x', content: '' }] }}
+            rows={cleared.map((h) => ({
+              key: `rule-${h.counterpartyId}-${h.entryId}`,
+              cells: [
+                { key: 'v', content: <Stack space="space.050"><Text>{h.counterparty.name}</Text>{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}</Stack> },
+                { key: 'q', content: h.queriedName },
+                { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{listName(h.entry?.list)}</Text></Stack> },
+                { key: 'y', content: h.reason || '' },
+                { key: 'd', content: fmtDate(h.reviewedAt) },
+                { key: 'x', content: <Button onClick={() => setOpen(h)}>Open</Button> },
+              ],
+            }))}
+          />
+        </Stack>
+      ) : null}
       <ModalTransition>{open ? <ReviewModal hit={open} onClose={(changed) => { setOpen(null); if (changed) { reload(); onChange(); } }} /> : null}</ModalTransition>
     </Stack>
   );

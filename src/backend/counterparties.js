@@ -173,13 +173,16 @@ export async function listCounterparties({ status = null, search = '', limit = 1
 }
 
 // Possible matches waiting for a reviewer, with the list entry behind each.
-export async function reviewQueue() {
-  const rows = await q(`SELECT h.*, c.name AS cp_name, c.country AS cp_country, c.owners AS cp_owners, c.issue_key, c.approved_at, e.list, e.ent_num, e.name AS entry_name, e.kind,
+const queueRows = async (where, order) => (await q(`SELECT h.*, c.name AS cp_name, c.country AS cp_country, c.owners AS cp_owners, c.issue_key, c.approved_at, e.list, e.ent_num, e.name AS entry_name, e.kind,
                                e.programs, e.countries, e.title, e.remarks, e.aliases, e.addresses, e.active AS entry_active
                         FROM hit h JOIN counterparty c ON c.id = h.counterparty_id LEFT JOIN list_entry e ON e.entry_id = h.entry_id
-                        WHERE h.status = 'pending' AND h.active = 1 ORDER BY c.approved_at IS NULL, h.found_at DESC, h.score DESC LIMIT 200`);
-  return rows.map((r) => ({ ...shapeHit(r), counterparty: { id: r.counterparty_id, name: r.cp_name, country: r.cp_country, owners: JSON.parse(r.cp_owners || '[]'), issueKey: r.issue_key, approvedAt: iso(r.approved_at) } }));
-}
+                        WHERE ${where} AND h.active = 1 ORDER BY ${order} LIMIT 200`))
+  .map((r) => ({ ...shapeHit(r), counterparty: { id: r.counterparty_id, name: r.cp_name, country: r.cp_country, owners: JSON.parse(r.cp_owners || '[]'), issueKey: r.issue_key, approvedAt: iso(r.approved_at) } }));
+
+export const reviewQueue = () => queueRows("h.status = 'pending'", 'c.approved_at IS NULL, h.found_at DESC, h.score DESC');
+
+// Matches the year-of-birth rule cleared, for a reviewer to check, for example when a year of birth was typed wrong.
+export const ruleCleared = () => queueRows("h.status = 'dismissed' AND h.reviewed_by = 'rule:birth-year'", 'h.reviewed_at DESC');
 
 // CSV: name, country, owners (owners separated by ";"). A header row is optional.
 export async function importCsv(text, actor) {

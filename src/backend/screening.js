@@ -86,6 +86,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     const prevOf = new Map(own.map((h) => [h.entry_id, h]));
     const ruledHere = new Set();
     const ruleEvents = [];
+    const backHere = [];
     for (const h of r.rows) {
       const prev = prevOf.get(h.entry_id);
       const byRule = prev?.reviewed_by === RULE && prev.status === 'dismissed' && h.status === 'dismissed';
@@ -100,6 +101,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
         if (!byRule) ruleEvents.push({ counterpartyId: cp.id, entryId: h.entry_id, issueKey: cp.issue_key, actor: RULE, type: 'match_dismissed', detail: { matchedName: h.matched_name, score: h.score, reason: `${o.name}, born ${String(o.born).slice(0, 4)}; the list entry gives ${listed.join(', ')}.`, listVersion: version } });
       } else if (byRule) {
         unruled.push([cp.id, h.entry_id]);
+        backHere.push({ entryId: h.entry_id, detail: { matchedName: h.matched_name, reason: o?.born ? `${o.name}, born ${String(o.born).slice(0, 4)}.` : `${h.queried_name}.` } });
         r.opened.push({ entryId: h.entry_id, reopened: true, matchedName: h.matched_name, queriedName: h.queried_name, score: h.score, entryHash: h.entry_hash });
       }
     }
@@ -128,7 +130,10 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
       const listed = cache.index.byEntry.get(e.entryId)?.name || e.detail.matchedName;
       return `${listed} (${e.entryId}${listed !== e.detail.matchedName ? `, matched on ${e.detail.matchedName}` : ''}): ${e.detail.reason}`;
     };
-    if (cp.issue_key && ruleEvents.length) ruleNotes.push([cp.issue_key, ruleEvents.map(noteLine)]);
+    const one = (n, a, b) => (n === 1 ? a : b);
+    if (cp.issue_key && ruleEvents.length) ruleNotes.push([cp.issue_key, `Sanctions Hold: the year-of-birth rule cleared ${one(ruleEvents.length, 'this possible match', 'these possible matches')}.`, ruleEvents.map(noteLine)]);
+    // The rule was turned off, or the year of birth or the entry changed: say on the work item that the match is open again.
+    if (cp.issue_key && backHere.length) ruleNotes.push([cp.issue_key, `Sanctions Hold: the year-of-birth rule no longer clears ${one(backHere.length, 'this possible match', 'these possible matches')}, so ${one(backHere.length, 'it is', 'they are')} back for review.`, backHere.map(noteLine)]);
     if (status !== cp.status) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'status_changed', detail: { from: cp.status, to: status, listVersion: version } });
     if (ids) events.push({ counterpartyId: cp.id, issueKey: cp.issue_key, actor, type: 'screened', detail: { status, matches: found.size, threshold, listVersion: version, reason } });
     const stillOpen = r.opened.filter((o) => !ruledHere.has(o.entryId));
@@ -156,7 +161,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   }
   if (!ids) events.push({ type: 'rescreen_all', actor, detail: { counterparties: cps.length, listVersion: version, threshold, reason, newMatches: events.filter((e) => e.type === 'match_found').length } });
   await logEvents(events);
-  for (const [k, lines] of ruleNotes) await comment(k, `Sanctions Hold: the year-of-birth rule cleared ${lines.length === 1 ? 'this possible match' : 'these possible matches'}.`, ...lines).catch((e) => console.error('rule note', k, e.message));
+  for (const [k, head, lines] of ruleNotes) await comment(k, head, ...lines).catch((e) => console.error('rule note', k, e.message));
   for (const m of approvedMatched) await notifyApprovedMatch(m, cache).catch((e) => console.error('notify', m.cp.issue_key, e.message));
   for (const [k, from, to] of newlyHeld) await syncWorkItem(k, from, to).catch((e) => console.error('hold', k, e.message));
   return { screened: cps.length, statuses: Object.fromEntries(statuses), approvedMatched: approvedMatched.map((m) => m.cp.id) };
