@@ -41,7 +41,7 @@ const JOB_NAME = { 'start-demo': 'Loading the lists and the sample vendors', imp
 
 // Polls while a queued job runs, then reloads the page data.
 function JobBanner({ jobs, onDone }) {
-  const running = Object.values(jobs || {}).filter((j) => j && (j.state === 'running' || j.state === 'queued') && Date.now() - Date.parse(j.startedAt) < 20 * 60 * 1000);
+  const running = Object.values(jobs || {}).filter((j) => j && (j.state === 'running' || j.state === 'queued') && Date.now() - Date.parse(j.startedAt) < (j.type === 'accuracy' ? 45 : 20) * 60 * 1000);
   const failed = Object.values(jobs || {}).filter((j) => j?.state === 'error' && Date.now() - Date.parse(j.finishedAt || j.startedAt) < 60 * 60 * 1000);
   useEffect(() => {
     if (!running.length) return undefined;
@@ -114,7 +114,7 @@ function ListLine({ list, check, onUpdate }) {
   return (
     <Inline space="space.100" alignBlock="center" shouldWrap>
       <Text color="color.text.subtle">
-        {`${[`OFAC SDN and Consolidated lists, updated ${list.published || 'unknown'}`, list.ukEntries ? `UK Sanctions List, updated ${list.ukPublished || 'unknown'}` : null, list.euEntries ? `EU Consolidated Financial Sanctions List, updated ${list.euPublished || 'unknown'}` : null].filter(Boolean).join('; ')}: ${list.entries.toLocaleString('en-US')} entities and individuals. Loaded ${fmtTime(list.fetchedAt)} UTC${check?.at && check.at > list.fetchedAt ? `; checked for a newer publication ${fmtTime(check.at)} UTC` : ''}.`}
+        {`Lists updated ${[`OFAC ${list.published || 'unknown'}`, list.ukEntries ? `UK ${list.ukPublished || 'unknown'}` : null, list.euEntries ? `EU ${list.euPublished || 'unknown'}` : null].filter(Boolean).join(', ')} · ${list.entries.toLocaleString('en-US')} entries · loaded ${fmtTime(list.fetchedAt)} UTC${check?.at && check.at > list.fetchedAt ? ` · last checked ${fmtTime(check.at)} UTC` : ''}`}
       </Text>
       <Button appearance="subtle" isLoading={busy} onClick={async () => { setBusy(true); try { await call('updateNow'); onUpdate(); } finally { setBusy(false); } }}>Reload the lists</Button>
     </Inline>
@@ -245,6 +245,13 @@ function ReviewModal({ hit, onClose }) {
   );
 }
 
+// Keeps the queue's order but puts each vendor's possible matches next to each other.
+const byVendor = (rows) => {
+  const first = new Map();
+  rows.forEach((h, i) => { if (!first.has(h.counterpartyId)) first.set(h.counterpartyId, i); });
+  return rows.map((h, i) => [h, i]).sort((a, b) => first.get(a[0].counterpartyId) - first.get(b[0].counterpartyId) || a[1] - b[1]).map(([h]) => h);
+};
+
 function ReviewQueue({ onChange, stamp }) {
   const { data, loading, error, reload } = useLoad('reviewQueue', {}, [stamp]);
   const [open, setOpen] = useState(null);
@@ -256,10 +263,11 @@ function ReviewQueue({ onChange, stamp }) {
       <Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
         head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Screened name' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Country (vendor / list entry)' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
-        rows={data.rows.map((h) => ({
+        rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
-            { key: 'v', content: <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
+            // A vendor with several possible matches is named once, on its first row.
+            { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? '' : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
             { key: 'q', content: h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
@@ -465,15 +473,24 @@ const KIND = {
   given_and_surname: 'Person by one given name and surname (middle names left out)',
 };
 
-function AccuracyTable({ r }) {
+// One row per kind of query, with a column pair (found of queries, rate) for each run.
+function AccuracyTable({ runs }) {
+  const found = (n, f) => `${num(f)} of ${num(n)}`;
+  const cells = (k, pick, bold = false) => runs.flatMap(({ key, r }) => {
+    const v = pick(r);
+    if (!v) return [{ key: `${key}-f`, content: '' }, { key: `${key}-r`, content: '' }];
+    const rate = pct(v.f / v.n);
+    return [{ key: `${key}-f`, content: found(v.n, v.f) }, { key: `${key}-r`, content: bold ? <Strong>{rate}</Strong> : rate }];
+  });
+  const kinds = Object.keys(KIND).filter((k) => runs.some(({ r }) => r.positives[k]));
   return (
     <DynamicTable
-      head={{ cells: [{ key: 'k', content: 'Query' }, { key: 'n', content: 'Queries' }, { key: 'f', content: 'Found' }, { key: 'r', content: 'Rate' }] }}
+      head={{ cells: [{ key: 'k', content: 'Query' }, ...runs.flatMap(({ key, label }) => [{ key: `${key}-f`, content: label }, { key: `${key}-r`, content: 'Rate' }])] }}
       rows={[
-        ...Object.entries(r.positives).map(([k, p]) => ({ key: k, cells: [{ key: 'k', content: KIND[k] || k }, { key: 'n', content: num(p.n) }, { key: 'f', content: num(p.found) }, { key: 'r', content: pct(p.found / p.n) }] })),
-        { key: 'all', cells: [{ key: 'k', content: <Strong>All list-name queries (recall)</Strong> }, { key: 'n', content: num(r.total.n) }, { key: 'f', content: num(r.total.found) }, { key: 'r', content: <Strong>{pct(r.recall)}</Strong> }] },
-        { key: 'neg', cells: [{ key: 'k', content: <Strong>Real company names not on the lists, flagged (false positives)</Strong> }, { key: 'n', content: num(r.negatives.n) }, { key: 'f', content: num(r.negatives.falsePositives) }, { key: 'r', content: <Strong>{pct(r.falsePositiveRate)}</Strong> }] },
-        ...(r.people ? [{ key: 'ppl', cells: [{ key: 'k', content: <Strong>Real person names not on the lists, flagged (false positives)</Strong> }, { key: 'n', content: num(r.people.n) }, { key: 'f', content: num(r.people.falsePositives) }, { key: 'r', content: <Strong>{pct(r.people.falsePositives / r.people.n)}</Strong> }] }] : []),
+        ...kinds.map((k) => ({ key: k, cells: [{ key: 'k', content: KIND[k] }, ...cells(k, (r) => r.positives[k] && { n: r.positives[k].n, f: r.positives[k].found })] })),
+        { key: 'all', cells: [{ key: 'k', content: <Strong>All list-name queries (recall)</Strong> }, ...cells('all', (r) => ({ n: r.total.n, f: r.total.found }), true)] },
+        { key: 'neg', cells: [{ key: 'k', content: <Strong>Real company names not on the lists, flagged (false positives)</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
+        { key: 'ppl', cells: [{ key: 'k', content: <Strong>Real person names not on the lists, flagged (false positives)</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
       ]}
     />
   );
@@ -499,24 +516,18 @@ function Accuracy({ onStarted, finishedAt }) {
   if (loading && !data) return <Spinner label="Loading" />;
   if (error) return <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage>;
   const { offline, last } = data;
+  const dates = (r) => [`OFAC ${r.listPublished}`, r.ukPublished ? `UK ${r.ukPublished}` : null, r.euPublished ? `EU ${r.euPublished}` : null].filter(Boolean).join(', ');
+  const shown = last || offline;
   return (
-    <Stack space="space.300">
-      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${offline.negatives.n.toLocaleString('en-US')} real company names and ${(offline.people?.n || 0).toLocaleString('en-US')} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
-      <Heading size="small">{last ? `In this site, on the lists updated ${[`OFAC ${last.listPublished}`, last.ukPublished ? `UK ${last.ukPublished}` : null, last.euPublished ? `EU ${last.euPublished}` : null].filter(Boolean).join(', ')}` : 'In this site'}</Heading>
-      {last ? (
-        <Stack space="space.100">
-          <AccuracyTable r={last} />
-          <Text color="color.text.subtle">{`Run ${fmtTime(last.at)} UTC at threshold ${last.threshold}; ${last.queries.toLocaleString('en-US')} searches against ${last.listNames.toLocaleString('en-US')} list names, ${last.avgMs.toFixed(1)} ms each on average.`}</Text>
-          {last.fpSamples?.length ? <Text color="color.text.subtle">{`Flagged company names: ${last.fpSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
-          {last.peopleSamples?.length ? <Text color="color.text.subtle">{`Flagged person names: ${last.peopleSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
-          <ByCountry r={last} />
-        </Stack>
-      ) : <Text>Not run in this site yet.</Text>}
-      <Inline><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again' : 'Run the test on the current lists'}</Button></Inline>
-      <Heading size="small">{`On samples not used for tuning (${offline.measuredAt}, lists updated ${offline.listPublished})`}</Heading>
-      <AccuracyTable r={offline} />
-      <ByCountry r={offline} />
-      <Text color="color.text.subtle">{`${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text>
+    <Stack space="space.200">
+      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
+      <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
+      {last ? <Text color="color.text.subtle">{`On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, with its own random draw of list entries and the same real names; ${num(last.queries)} searches against ${num(last.listNames)} list names, ${last.avgMs.toFixed(1)} ms each on average.`}</Text> : <Text color="color.text.subtle">Not run on this site yet.</Text>}
+      <Text color="color.text.subtle">{`Held-out sample, not used for tuning: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}. ${offline.note} Company names: ${data.negativesSource}. Person names: ${data.peopleSource}.`}</Text>
+      <ByCountry r={shown} />
+      {last?.fpSamples?.length ? <Text color="color.text.subtle">{`Flagged company names: ${last.fpSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
+      {last?.peopleSamples?.length ? <Text color="color.text.subtle">{`Flagged person names: ${last.peopleSamples.slice(0, 6).map((f) => `${f.name} (${f.country}) ~ ${f.matched}`).join('; ')}.`}</Text> : null}
+      <Inline><Button isLoading={busy} onClick={async () => { setBusy(true); try { await call('runAccuracy'); onStarted(); } finally { setBusy(false); } }}>{last ? 'Run again on this site' : 'Run the test on this site'}</Button></Inline>
     </Stack>
   );
 }

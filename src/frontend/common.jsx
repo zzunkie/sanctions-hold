@@ -81,7 +81,8 @@ export function placesOfHit(hit, cp) {
 }
 
 // The evidence a reviewer needs, side by side: what the vendor gave and what the list entry says.
-export function MatchEvidence({ hit, cp }) {
+// In the narrow sidebar (compact) only the entry and the year of birth, nationality or country are shown.
+export function MatchEvidence({ hit, cp, compact = false }) {
   const e = hit.entry;
   if (!e) return <Text>{`${hit.matchedName} (${hit.entryId}); the list entry is no longer stored.`}</Text>;
   const owner = ownerOfHit(hit, cp);
@@ -93,6 +94,19 @@ export function MatchEvidence({ hit, cp }) {
   // Red when the owner's detail agrees with the list entry, green when it differs.
   const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'success'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
+  if (compact) {
+    const line = (label, mine, theirs, cmp) => <Inline key={label} space="space.050" alignBlock="center" shouldWrap><Text>{`${label}: ${mine} / ${theirs}`}</Text>{tag(cmp)}</Inline>;
+    return (
+      <Stack space="space.075">
+        <Text weight="medium">{matchedText(hit)}</Text>
+        <Text color="color.text.subtle">{`${listName(e.list)} entry ${entryRef(hit)}${e.onList ? '' : ', since removed'}. Score ${score(hit.score)}.`}</Text>
+        {owner
+          ? [line('Born', owner.born || 'not given', facts.born || 'none given', facts.bornCompared), line('Nationality', countryName(owner.nationality) || 'not given', facts.nationality || 'none given', facts.nationalityCompared)]
+          : line('Country', countryName(cp.country) || 'not given', e.countries || 'none given', sameCountry === null ? null : sameCountry ? 'same' : 'differs')}
+        <Text color="color.text.subtle">{`${e.list === 'UK' || e.list === 'EU' ? 'Regime' : 'Program'}: ${e.programs || 'none given'}`}</Text>
+      </Stack>
+    );
+  }
   const row = (key, label, mine, theirs) => ({ key, cells: [{ key: 'l', content: <Strong>{label}</Strong> }, { key: 'v', content: mine }, { key: 'e', content: theirs }] });
   const rows = [
     row('n', owner ? (owner.role === 'director' ? 'Director' : 'Owner') : 'Name', owner ? `${owner.name}${owner.role === 'director' ? ' (director)' : owner.share != null ? ` (${owner.share}%)` : ''}` : cp.name, matchedText(hit)),

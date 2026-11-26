@@ -14,6 +14,8 @@ const STATUS_NOTE = {
 function Panel() {
   const context = useProductContext();
   const issueKey = context?.extension?.issue?.key;
+  // The same resource renders the sidebar (issueContext) and the wider panel opened from Apps (issuePanel).
+  const compact = context?.moduleKey === 'sanctions-hold-context' || context?.extension?.type === 'jira:issueContext';
   const [data, setData] = useState(undefined);
   const [form, setForm] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -54,7 +56,7 @@ function Panel() {
       {cp ? (
         <Stack space="space.150">
           <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>
-          <Text color="color.text.subtle">{`${countryName(cp.country) || 'No country'} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
+          <Text color="color.text.subtle">{compact ? `Screened ${fmtTime(cp.screened_at)} UTC` : `${countryName(cp.country) || 'No country'} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
           {note ? <Text>{note}</Text> : null}
           <OwnershipNote view={view} onDone={load} />
           {open.map((h) => {
@@ -63,12 +65,13 @@ function Panel() {
               <Stack key={h.entryId} space="space.100">
                 <Heading size="xsmall">{`${h.status === 'confirmed' ? 'Confirmed match' : h.status === 'dismissed' ? 'Dismissed match' : 'Possible match'} for ${owner ? `${owner.role === 'director' ? 'director' : 'owner'} ${owner.name}` : 'the company name'}`}</Heading>
                 {h.status !== 'pending' ? <Inline><HitLozenge status={h.status} person={Boolean(owner)} /></Inline> : null}
-                <MatchEvidence hit={h} cp={cp} />
+                <MatchEvidence hit={h} cp={cp} compact={compact} />
                 <ReviewedNote hit={h} />
                 {h.status === 'pending' ? <ReviewForm hit={h} cp={cp} onDone={load} /> : null}
               </Stack>
             );
           })}
+          {compact && open.length ? <Text color="color.text.subtle">The wider panel under the work item's Apps button shows each full list entry side by side with the vendor.</Text> : null}
           {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit name, country or owners</Button></Inline>}
         </Stack>
       ) : (

@@ -7,9 +7,10 @@ import { COUNTRIES, countryNameOf } from '../core/countries.js';
 const COUNTRY_OPTIONS = COUNTRIES.map(([value, label]) => ({ value, label }));
 const ROLE_OPTIONS = [{ value: 'owner', label: 'Owner' }, { value: 'director', label: 'Director' }];
 const nameBox = xcss({ width: '220px' });
-const shareBox = xcss({ width: '80px' });
+const shareBox = xcss({ width: '96px' });
 const roleBox = xcss({ width: '130px' });
-const bornBox = xcss({ width: '120px' });
+const bornBox = xcss({ width: '150px' });
+const affix = xcss({ paddingInline: 'space.100' });
 const natBox = xcss({ width: '220px' });
 const YEAR = /^\d{4}(-\d{2}-\d{2})?$/;
 
@@ -53,12 +54,13 @@ function VendorDetailsEdit() {
           <Inline space="space.100" alignBlock="center" shouldWrap>
             <Box xcss={nameBox}><Textfield id={`vd-owner-${i}`} aria-label="Full name" placeholder="Full name" value={o.name} onChange={(e) => setOwner(i, { name: e.target.value })} /></Box>
             <Box xcss={roleBox}><Select aria-label="Role" options={ROLE_OPTIONS} value={ROLE_OPTIONS.find((r) => r.value === (o.role || 'owner'))} onChange={(r) => setOwner(i, { role: r.value })} /></Box>
-            {o.role !== 'director' ? <Box xcss={shareBox}><Textfield type="number" aria-label="Share (%)" placeholder="Share %" value={String(o.share ?? '')} onChange={(e) => setOwner(i, { share: e.target.value })} /></Box> : null}
+            {o.role !== 'director' ? <Box xcss={shareBox}><Textfield type="number" aria-label="Share (%)" placeholder="Share" elemAfterInput={<Box xcss={affix}><Text color="color.text.subtle">%</Text></Box>} value={String(o.share ?? '')} onChange={(e) => setOwner(i, { share: e.target.value })} /></Box> : null}
             <Button appearance="subtle" onClick={() => update({ ...value, owners: value.owners.filter((_, j) => j !== i) })}>Remove</Button>
           </Inline>
           <Inline space="space.100" alignBlock="center" shouldWrap>
-            <Box xcss={bornBox}><Textfield aria-label="Year of birth" placeholder="Born (year)" value={String(o.born ?? '')} onChange={(e) => setOwner(i, { born: e.target.value })} /></Box>
-            <Box xcss={natBox}><Select aria-label="Nationality" placeholder="Nationality" options={COUNTRY_OPTIONS} isClearable
+            <Box xcss={bornBox}><Textfield aria-label="Year of birth" placeholder="year" elemBeforeInput={<Box xcss={affix}><Text color="color.text.subtle">Born</Text></Box>} value={String(o.born ?? '')} onChange={(e) => setOwner(i, { born: e.target.value })} /></Box>
+            <Text color="color.text.subtle">Nationality</Text>
+            <Box xcss={natBox}><Select aria-label="Nationality" placeholder="Choose" options={COUNTRY_OPTIONS} isClearable
               value={o.nationality ? { value: o.nationality, label: countryNameOf(o.nationality) || o.nationality } : null}
               onChange={(c) => setOwner(i, { nationality: c?.value || '' })} /></Box>
           </Inline>

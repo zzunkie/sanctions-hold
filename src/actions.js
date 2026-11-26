@@ -139,16 +139,18 @@ export async function listChanges(payload) {
                            WHERE h.found_at >= ? AND h.status = 'pending' AND h.active = 1
                              AND h.entry_id IN (SELECT entry_id FROM list_change WHERE at >= ? AND change_type IN ('added', 'changed'))
                            ORDER BY c.approved_at IS NULL, h.score DESC LIMIT 50`, since, since);
-  const count = (t) => changes.filter((c) => c.change_type === t).length;
+  const totals = await q('SELECT change_type, COUNT(*) AS n FROM list_change WHERE at >= ? GROUP BY change_type', since);
+  const count = (t) => Number(totals.find((r) => r.change_type === t)?.n || 0);
   const approved = matched.filter((m) => m.approved_at);
   const waiting = matched.filter((m) => !m.approved_at);
   // The first import of a site has no list changes; it is not counted as an update.
   const updates = versions.filter((v) => v.added || v.removed || v.changed);
+  const span = days === 1 ? 'day' : `${days} days`;
   const answer = versions.length
-    ? `${updates.length ? `In the last ${days} days Sanctions Hold loaded ${updates.length} sanctions list ${updates.length === 1 ? 'update' : 'updates'}: ${count('added')} entries added, ${count('removed')} removed, ${count('changed')} changed.` : `In the last ${days} days Sanctions Hold loaded the sanctions lists for the first time and no update has come since.`} `
+    ? `${updates.length ? `In the last ${span}, Sanctions Hold loaded ${updates.length} sanctions list ${updates.length === 1 ? 'update' : 'updates'}: ${count('added')} entries added, ${count('removed')} removed, ${count('changed')} changed.` : `In the last ${span}, Sanctions Hold loaded the sanctions lists for the first time, and no update has been loaded since.`} `
       + (approved.length ? `${approved.length} approved ${approved.length === 1 ? 'vendor now has' : 'vendors now have'} a possible match: ${approved.map((m) => `${m.name}${m.issue_key ? ` (${m.issue_key})` : ''} ~ ${m.matched_name}`).join('; ')}.` : 'No approved vendor gained a possible match.')
       + (waiting.length ? ` ${waiting.length} ${waiting.length === 1 ? 'vendor' : 'vendors'} not yet approved also gained one: ${waiting.map((m) => `${m.name}${m.issue_key ? ` (${m.issue_key})` : ''} ~ ${m.matched_name}`).join('; ')}.` : '')
-    : `No sanctions list update was loaded in the last ${days} days.`;
+    : `No sanctions list update was loaded in the last ${span}.`;
   return {
     answer, days,
     updates: versions.map((v) => ({ version: v.id, published: v.published, loadedAt: iso(v.fetched_at), entries: v.entries, added: v.added, removed: v.removed, changed: v.changed, note: v.note })),
