@@ -318,12 +318,13 @@ function ReviewQueue({ onChange, stamp }) {
   if (loading && !data) return <Spinner label="Loading the review queue" />;
   if (error) return <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage>;
   const cleared = data.ruleCleared || [];
-  if (!data.rows.length && !cleared.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
+  const ownership = data.ownership || [];
+  if (!data.rows.length && !cleared.length && !ownership.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
   return (
     <Stack space="space.200">
       {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
-        head={{ cells: [{ key: 'v', content: 'Vendor', width: 19 }, { key: 'q', content: 'Found by', width: 10 }, { key: 'm', content: 'List entry', width: 24 }, { key: 'c', content: 'Vendor and list entry', width: 25 }, { key: 's', content: 'Score', width: 8 }, { key: 'f', content: 'Found', width: 8 }, { key: 'x', content: '', width: 6 }] }}
+        head={{ cells: [{ key: 'v', content: 'Vendor', width: 19 }, { key: 'q', content: 'Found by', width: 10 }, { key: 'm', content: 'List entry', width: 24 }, { key: 'c', content: 'Vendor and list entry', width: 25 }, { key: 's', content: 'Name score', width: 8 }, { key: 'f', content: 'Found', width: 8 }, { key: 'x', content: '', width: 6 }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
@@ -332,12 +333,19 @@ function ReviewQueue({ onChange, stamp }) {
             { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
-            { key: 's', content: scoreCell(h.score, h.matchedOn) },
+            { key: 's', content: h.matchedOn ? '' : score(h.score) },
             { key: 'f', content: fmtDate(h.foundAt) },
             { key: 'x', content: <Button onClick={() => setOpen(h)}>Review</Button> },
           ],
         }))}
       /></> : <Text>No possible matches waiting for review.</Text>}
+      {ownership.length ? (
+        <Stack space="space.100">
+          <Heading size="small">Waiting for an ownership decision</Heading>
+          <Text color="color.text.subtle">A listed minority owner or director is confirmed and no ownership rule blocks the vendor, so a reviewer decides in the Sanctions Hold panel whether to proceed or block.</Text>
+          <Inline space="space.200" shouldWrap>{ownership.map((c) => <Inline key={c.id} space="space.050"><Text>{c.name}</Text><IssueLink k={c.issue_key} /></Inline>)}</Inline>
+        </Stack>
+      ) : null}
       {cleared.length ? (
         <Stack space="space.100">
           <Heading size="small">Cleared by the year-of-birth rule</Heading>

@@ -4,7 +4,7 @@ import api, { route } from '@forge/api';
 import { ensureSchema, q, iso, getSetting, setSetting, logEvent } from './backend/db.js';
 import { listState } from './backend/lists.js';
 import {
-  counts, listCounterparties, counterpartyView, reviewQueue, ruleCleared, reviewMatch, createCounterparty, updateCounterparty,
+  counts, listCounterparties, counterpartyView, reviewQueue, ruleCleared, ownershipWaiting, reviewMatch, createCounterparty, updateCounterparty,
   byIssue, importCsv, removeSample, auditCsv, auditRows, decideCounterparty,
 } from './backend/counterparties.js';
 import { setVendorField } from './backend/vendor-field.js';
@@ -66,7 +66,7 @@ async function assertAdmin(ctx) {
 }
 define('removeSample', async (_, ctx) => { await assertAdmin(ctx); await removeSample(); return {}; });
 
-define('reviewQueue', async () => ({ rows: await reviewQueue(), ruleCleared: await ruleCleared() }));
+define('reviewQueue', async () => ({ rows: await reviewQueue(), ruleCleared: await ruleCleared(), ownership: await ownershipWaiting() }));
 define('review', async ({ counterpartyId, entryId, decision, reason }, ctx) => {
   await assertReviewer(ctx.accountId);
   return reviewMatch({ counterpartyId, entryId, decision, reason }, ctx.accountId);

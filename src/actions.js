@@ -90,7 +90,7 @@ export async function screenCounterparty(payload, context) {
     const byRule = !reviewed.get(entryId) && ruleCleared.has(entryId);
     return {
       listEntry: entryId, ...euRef(e && { list: e.list, remarks: remarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedOn ? `registration number (${f.matchedOn})` : f.matchedName,
-      screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
+      screenedName: f.queriedName, score: f.matchedOn ? null : f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
       reviewed: reviewed.get(entryId) || (byRule ? 'year-of-birth rule' : null),
       ...(byRule ? { yearOfBirthRule: `born ${born}; the list entry gives ${listed.join(', ')}` } : {}),
     };
@@ -111,7 +111,7 @@ export async function screenCounterparty(payload, context) {
   }
   const head = open.length ? 'Possible match' : matches.every((m) => m.yearOfBirthRule) ? `${matches.length === 1 ? 'Match' : 'Matches'} cleared by the year-of-birth rule` : 'Reviewed match';
   const answer = matches.length
-    ? `${head} for "${name}": ${said.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.matchedOn.startsWith('registration number') ? `${m.matchedOn} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''}), score ${Number(m.score).toFixed(2)}${REVIEWED[m.reviewed] || (m.yearOfBirthRule ? `, cleared by the year-of-birth rule (${m.yearOfBirthRule})` : '')}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
+    ? `${head} for "${name}": ${said.slice(0, 3).map((m) => `${m.screenedName !== name ? `owner or director ${m.screenedName} ~ ` : ''}${m.matchedOn.startsWith('registration number') ? `${m.matchedOn} ~ ` : ''}${m.name} (${m.list}, ${m.programs || 'no program given'}${m.countries ? `; ${m.countries}` : ''})${m.score == null ? '' : `, score ${Number(m.score).toFixed(2)}`}${REVIEWED[m.reviewed] || (m.yearOfBirthRule ? `, cleared by the year-of-birth rule (${m.yearOfBirthRule})` : '')}`).join('; ')}.${open.length ? ' A reviewer compares the details in Sanctions Hold to decide whether it is the same party.' : ''}`
     : `No match for "${name}"${owners.length ? ` or its owners (${owners.join(', ')})` : ''} on the OFAC SDN and Consolidated lists (updated ${cache.state.published})${cache.state.ukPublished ? `, the UK Sanctions List (updated ${cache.state.ukPublished})` : ''}${cache.state.euPublished ? ` or the EU Consolidated Financial Sanctions List (updated ${cache.state.euPublished})` : ''}.`;
   // A known vendor is answered from its record first, where the reviewers' decisions are.
   const knownText = known ? `${known.name} is already a vendor in Sanctions Hold${known.issue_key ? ` (${known.issue_key})` : ''}: ${STATUS_TEXT[known.status] || known.status}.${stored.length ? ` Screened with the owners and directors on its record (${stored.join(', ')}).` : ''} ` : '';
@@ -296,7 +296,7 @@ export async function matchEvidence(payload, context) {
     const listedCountries = String(e?.countries || '').toLowerCase();
     const sameCountry = !owner && cp.country && listedCountries ? (countrySpellings(cp.country).some((x) => listedCountries.includes(x)) ? 'same' : 'differs') : null;
     return {
-      listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedOn ? `registration number (${h.matchedOn})` : h.matchedName, score: h.score,
+      listEntry: h.entryId, ...euRef(e), list: LIST_NAMES[e?.list] || e?.list || null, name: e?.name || h.matchedName, matchedOn: h.matchedOn ? `registration number (${h.matchedOn})` : h.matchedName, score: h.matchedOn ? null : h.score,
       review: h.status === 'pending' ? 'waiting for review' : h.status === 'confirmed' ? `confirmed as the same ${owner ? 'person' : 'party'}` : h.reviewedBy === 'rule:birth-year' ? 'cleared by the year-of-birth rule' : `dismissed as not the same ${owner ? 'person' : 'party'}`,
       reviewReason: h.reason || null,
       foundFor: owner

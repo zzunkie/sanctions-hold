@@ -29,7 +29,7 @@ Write `owners` as one string separated by semicolons, with each owner's share, a
 
 1. Screen the legal name with the owners and directors, and with the country and registration number when the user gives them. A company whose own name is clean gets a possible match when one of its owners or directors is listed, or when a list entry gives its registration number.
 2. Read `result`:
-   - `possible_match`: name the closest list entry, its list, its program or regime, the score to two decimal places (such as 0.97 or 1.00), and the owner or director it matched, or the registration number when `matchedOn` gives one. Call it a possible match until a reviewer decides in Sanctions Hold; approval in Jira stays on hold until then.
+   - `possible_match`: name the closest list entry, its list, its program or regime, and the owner or director it matched with the score to two decimal places (such as 0.97 or 1.00), or the registration number when `matchedOn` gives one (a match on a number has no score). Call it a possible match until a reviewer decides in Sanctions Hold; approval in Jira stays on hold until then.
    - `confirmed_match`: the vendor is already in Sanctions Hold and a reviewer confirmed the match (`reviewed` is `confirmed`). Give the list entry and the vendor's status.
    - `no_match`: no open or confirmed match at or above the site's threshold on the lists as updated on the dates in `listPublished` (OFAC), `ukListPublished` (UK) and `euListPublished` (EU).
 3. If the user wants to go ahead, call `request-approval` with the same name, country and owners, the address and registration number when the user gave them, and a short note on why the vendor is needed. Give the user the work item key it returns. Approval then waits in Jira.
