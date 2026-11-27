@@ -3,6 +3,7 @@
 // (OFAC also "citizen ..."); an entry can give several dates of birth.
 import { COUNTRY_NAMES } from './sample.js';
 import { countryNameOf } from './countries.js';
+import { normalize } from './match.js';
 
 export const countrySpellings = (c) => [COUNTRY_NAMES[String(c || '').toUpperCase()], countryNameOf(c)].filter(Boolean).map((x) => x.toLowerCase());
 
@@ -40,6 +41,18 @@ export function birthYearClears(born, years, tolerance = 1) {
   const y = Number(String(born || '').slice(0, 4));
   if (!y || !years?.length) return false;
   return years.every((x) => Math.abs(Number(x) - y) > tolerance);
+}
+
+// The year-of-birth rule over the possible matches of one owner or director, each { id, name (the entry's
+// primary name), years }: returns the ids it clears. A match is cleared when the owner's year is more than
+// `tolerance` years from every year of birth on its entry, unless another matched entry under the same primary
+// name, usually the same person on another list, gives no year or one within it. Lists sometimes give one
+// person different years, and each list's ownership rule needs that person's own entry left for the reviewer.
+const nameKey = (n) => normalize(n).split(' ').filter(Boolean).sort().join(' ');
+export function clearedByBirthYear(born, matches, tolerance = 1) {
+  const clears = (m) => birthYearClears(born, m.years, tolerance);
+  const kept = new Set(matches.filter((m) => !clears(m)).map((m) => nameKey(m.name)));
+  return new Set(matches.filter((m) => clears(m) && !kept.has(nameKey(m.name))).map((m) => m.id));
 }
 
 // "same" or "differs" for the year of birth and the nationality, or null when either side is missing.

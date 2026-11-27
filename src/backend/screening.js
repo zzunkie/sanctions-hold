@@ -2,7 +2,7 @@
 import { screen } from '../core/match.js';
 import { reconcile, statusOf } from '../core/decision.js';
 import { ownerNames, ownerList, ownerStrings } from '../core/owners.js';
-import { listFacts, birthYearClears, normId, countrySpellings } from '../core/evidence.js';
+import { listFacts, clearedByBirthYear, normId, countrySpellings } from '../core/evidence.js';
 import { MIN_ID } from './screen-index.js';
 import { q, marks, insertMany, logEvents, logEvent, getSetting, nowDt } from './db.js';
 import { loadIndex } from './screen-index.js';
@@ -98,14 +98,18 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
   const unruled = [];
   const ruleNotes = [];
   const founds = cps.map((cp) => registrationHits(cache, screenNames(cache.index, [cp.name, ...ownerNames(cp.owners)], threshold), { name: cp.name, registrationNumber: cp.reg_no, country: cp.country }));
-  // Years of birth on the entries matched to an owner or director with a year of birth, for the year-of-birth rule.
+  // Years of birth and primary names of the entries matched to an owner or director with a year of birth, for the year-of-birth rule.
   const years = new Map();
+  const names = new Map();
   if (policy.birthYearRule) {
     const ids = [...new Set(cps.flatMap((cp, i) => {
       const born = new Set(ownerList(cp.owners).filter((o) => o.born).map((o) => o.name.toLowerCase()));
       return [...founds[i]].filter(([, f]) => born.has(String(f.queriedName).toLowerCase())).map(([id]) => id);
     }))];
-    for (const e of await rowsIn('SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (?)', ids)) years.set(e.entry_id, listFacts(e).years);
+    for (const e of await rowsIn('SELECT entry_id, name, remarks FROM list_entry WHERE entry_id IN (?)', ids)) {
+      years.set(e.entry_id, listFacts(e).years);
+      names.set(e.entry_id, e.name);
+    }
   }
   for (const [i, cp] of cps.entries()) {
     const own = hitsBy.get(cp.id) || [];
@@ -115,6 +119,15 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
     const owners = new Map(ownerList(cp.owners).map((o) => [o.name.toLowerCase(), o]));
     const prevOf = new Map(own.map((h) => [h.entry_id, h]));
     const ruledHere = new Set();
+    // The matches the year-of-birth rule clears, decided over each owner's matches together.
+    const ruleClears = new Set();
+    if (policy.birthYearRule) {
+      for (const o of owners.values()) {
+        if (!o.born) continue;
+        const mine = r.rows.filter((h) => String(h.queried_name).toLowerCase() === o.name.toLowerCase());
+        for (const id of clearedByBirthYear(o.born, mine.map((h) => ({ id: h.entry_id, name: names.get(h.entry_id), years: years.get(h.entry_id) || [] })))) ruleClears.add(id);
+      }
+    }
     const ruleEvents = [];
     const backHere = [];
     for (const h of r.rows) {
@@ -124,7 +137,7 @@ export async function screenCounterparties(ids = null, { actor = 'app', reason =
       if (h.status !== 'pending' || (prev?.reviewed_by && prev.reviewed_by !== RULE)) continue;
       const o = owners.get(String(h.queried_name).toLowerCase());
       const listed = years.get(h.entry_id) || [];
-      if (policy.birthYearRule && o?.born && birthYearClears(o.born, listed)) {
+      if (ruleClears.has(h.entry_id)) {
         h.status = 'dismissed';
         ruledHere.add(h.entry_id);
         ruled.push([cp.id, h.entry_id, o.born, listed.join(', ')]);

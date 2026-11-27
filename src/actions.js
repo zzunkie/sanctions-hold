@@ -11,7 +11,7 @@ import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
 import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
-import { compareOwner, listFacts, birthYearClears, compareRegistration, countrySpellings } from './core/evidence.js';
+import { compareOwner, listFacts, clearedByBirthYear, compareRegistration, countrySpellings } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
 // The EU reference number ("EU.12764.77") that the panel and the Commission's file show for an EU entry.
@@ -76,13 +76,18 @@ export async function screenCounterparty(payload, context) {
   const remarks = new Map(remarkIds.length
     ? (await q(`SELECT entry_id, remarks FROM list_entry WHERE entry_id IN (${remarkIds.map(() => '?').join(', ')})`, ...remarkIds)).map((r) => [r.entry_id, r.remarks])
     : []);
+  // The same rule a vendor's screening applies, over each owner's matches together.
+  const ruleCleared = new Set();
+  for (const [key, born] of bornOf) {
+    const mine = ruleIds.filter((id) => compact(found.get(id).queriedName) === key);
+    for (const id of clearedByBirthYear(born, mine.map((id) => ({ id, name: cache.index.byEntry.get(id)?.name, years: listFacts({ remarks: remarks.get(id) }).years })))) ruleCleared.add(id);
+  }
   const country = text(payload?.country, 60) || null;
   const matches = [...found.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 10).map(([entryId, f]) => {
     const e = cache.index.byEntry.get(entryId);
-    // The same rule a vendor's screening applies: cleared when the year of birth is more than a year from every one on the entry.
     const born = ruleIds.includes(entryId) ? bornOf.get(compact(f.queriedName)) : null;
     const listed = born ? listFacts({ remarks: remarks.get(entryId) }).years : [];
-    const byRule = !reviewed.get(entryId) && born && birthYearClears(born, listed);
+    const byRule = !reviewed.get(entryId) && ruleCleared.has(entryId);
     return {
       listEntry: entryId, ...euRef(e && { list: e.list, remarks: remarks.get(entryId) }), list: LIST_NAMES[e?.list] || e?.list, name: e?.name, matchedOn: f.matchedOn ? `registration number (${f.matchedOn})` : f.matchedName,
       screenedName: f.queriedName, score: f.score, programs: e?.programs || null, countries: e?.countries || null, type: e?.kind,
