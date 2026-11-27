@@ -88,8 +88,8 @@ export function demoVendors(now = Date.now()) {
       note: 'The 60% owner is on the UK Sanctions List only (listed with two middle names), so the UK ownership test blocks it once confirmed.',
     },
     {
-      key: 'd-namesake', name: 'Savannah Freight Ltd', country: 'KE', owners: ['Yusuf Ibrahim (100%, born 1990, nationality Kenya)'], approvedAt: null, request: true,
-      requestText: 'We need Savannah Freight for trucking from Mombasa to Nairobi. From the onboarding form: the owner, Yusuf Ibrahim, holds Kenyan passport AK0412377 and was born on 14 March 1990 in Mombasa.',
+      key: 'd-namesake', name: 'Savannah Freight Ltd', country: 'KE', owners: ['Yusuf Ibrahim (100%, born 1993, nationality Kenya)'], approvedAt: null, request: true,
+      requestText: 'We need Savannah Freight for trucking from Mombasa to Nairobi. From the onboarding form: the owner, Yusuf Ibrahim, holds Kenyan passport AK0412377 and was born on 14 March 1993 in Mombasa.',
       note: 'The owner shares a common name with two listed people; the owner\'s year of birth and nationality differ from both, so a reviewer dismisses them.',
     },
     {
