@@ -610,8 +610,8 @@ function AccuracyTable({ runs }) {
       rows={[
         ...kinds.map((k) => ({ key: k, cells: [{ key: 'k', content: KIND[k] }, ...cells(k, (r) => r.positives[k] && { n: r.positives[k].n, f: r.positives[k].found })] })),
         { key: 'all', cells: [{ key: 'k', content: <Strong>All list-name queries (recall)</Strong> }, ...cells('all', (r) => ({ n: r.total.n, f: r.total.found }), true)] },
-        { key: 'neg', cells: [{ key: 'k', content: <Strong>{`Real company names not on the lists, flagged (false positives${runs.length > 1 ? '; the same names in both runs' : ''})`}</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
-        { key: 'ppl', cells: [{ key: 'k', content: <Strong>{`Real person names not on the lists, flagged (false positives${runs.length > 1 ? '; the same names in both runs' : ''})`}</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
+        { key: 'neg', cells: [{ key: 'k', content: <Strong>{'Real company names not on the lists, flagged (false positives)'}</Strong> }, ...cells('neg', (r) => ({ n: r.negatives.n, f: r.negatives.falsePositives }), true)] },
+        { key: 'ppl', cells: [{ key: 'k', content: <Strong>{'Real person names not on the lists, flagged (false positives)'}</Strong> }, ...cells('ppl', (r) => r.people && { n: r.people.n, f: r.people.falsePositives }, true)] },
         ...(runs.some(({ r }) => r.peopleAfterBirthYearRule) ? [{ key: 'ppl-year', cells: [{ key: 'k', content: 'The same people, with the year-of-birth rule on (see Settings)' }, ...cells('ppl-year', (r) => r.people && r.peopleAfterBirthYearRule && { n: r.people.n, f: r.peopleAfterBirthYearRule.left })] }] : []),
       ]}
     />
@@ -645,7 +645,7 @@ function Accuracy({ onStarted, finishedAt }) {
   const shown = last || offline;
   return (
     <Stack space="space.200">
-      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review.`}</Text>
+      <Text>{`How the test works: 1,500 list entries are drawn at random and each is searched for by its listed name, an alias and five kinds of name variant. Recall is the share of those searches that find the entry. The false positive rates are the shares of ${num(offline.negatives.n)} real company names and ${num(offline.people?.n || 0)} real person names from 17 countries and territories, not on the lists, that are flagged for review. Both columns search the same real names.`}</Text>
       <AccuracyTable runs={[...(last ? [{ key: 'site', label: 'On this site', r: last }] : []), { key: 'off', label: 'Held-out sample', r: offline }]} />
       <Text color="color.text.subtle">{`${last ? `On this site: run ${fmtTime(last.at)} UTC at threshold ${last.threshold} on the lists updated ${dates(last)}, ${num(last.queries)} searches.` : 'Not run on this site yet.'} Held-out sample: measured offline ${offline.measuredAt} at threshold ${offline.threshold} on the lists updated ${offline.listPublished}, with names that were not used to tune the matcher.`}</Text>
       <Text color="color.text.subtle">Registration numbers (measured offline 2026-11-26): all 14,034 numbers of six characters or more on company and organisation entries find their entry when searched with the country given for each. None of 10,809 GLEIF companies searched by registration number (1,846 in Russia, 8,963 in 16 other countries and territories) matched another company's entry.</Text>

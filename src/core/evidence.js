@@ -61,11 +61,13 @@ export function clearedByBirthYear(born, matches, tolerance = 1) {
   return new Set(matches.filter((m) => clears(m) && !kept.has(nameKey(m.name))).map((m) => m.id));
 }
 
-// "same" or "differs" for the year of birth and the nationality, or null when either side is missing.
+// "same" or "differs" for the year of birth and the nationality, or null when either side is missing. A year of
+// birth one year from one of the entry's is "within a year", which the year-of-birth rule leaves open.
 export function compareOwner(owner, entry) {
   const f = listFacts(entry);
   const year = owner?.born ? String(owner.born).slice(0, 4) : null;
-  const born = year && f.years.length ? (f.years.includes(year) ? 'same' : 'differs') : null;
+  const near = (y) => Math.abs(Number(y) - Number(year)) <= 1;
+  const born = year && f.years.length ? (f.years.includes(year) ? 'same' : f.years.some(near) ? 'within a year' : 'differs') : null;
   const listed = (f.nationality || '').toLowerCase();
   const nationality = owner?.nationality && listed ? (countrySpellings(owner.nationality).some((x) => listed.includes(x)) ? 'same' : 'differs') : null;
   return { ...f, bornCompared: born, nationalityCompared: nationality };

@@ -79,7 +79,7 @@ export function placesOfHit(hit, cp) {
   const line = (label, mine, listed, cmp) => (
     <Inline key={label} space="space.050" alignBlock="center" shouldWrap>
       <Text>{`${label} ${mine || 'not given'}, list ${listed || 'none'}`}</Text>
-      {cmp ? <Lozenge appearance={cmp === 'same' ? 'moved' : 'default'}>{cmp}</Lozenge> : null}
+      {cmp ? <Lozenge appearance={cmp === 'differs' ? 'default' : 'moved'}>{cmp}</Lozenge> : null}
     </Inline>
   );
   if (!owner) {
@@ -116,7 +116,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
   const facts = compareOwner(owner, e);
   const reg = owner ? { ids: [], registrationCompared: null } : compareRegistration(cp.registrationNumber, e);
   // Yellow when the detail agrees with the list entry, grey when it differs.
-  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'moved' : 'default'}>{cmp}</Lozenge> : null);
+  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'differs' ? 'default' : 'moved'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
   if (compact) {
     const cmp = owner
@@ -238,7 +238,7 @@ export function OwnershipNote({ view, onDone, compact = false }) {
     return <SectionMessage appearance="error" title="Blocked under the UK ownership test"><Text>{`${listedPeople(a)}, confirmed as listed on the UK Sanctions List, holds ${a.share}% of ${stop(cp.name)} The UK treats a company in which a designated person holds more than 50% as subject to the asset freeze.`}</Text></SectionMessage>;
   }
   if (a.reason === 'eu-ownership') {
-    return <SectionMessage appearance="error" title="Blocked under the EU ownership rule"><Text>{`${listedPeople(a)}, confirmed on the EU consolidated list, ${one(a) ? 'holds' : 'hold a combined'} ${a.share}% of ${stop(cp.name)} Under the EU Best Practices, a company in which listed persons hold 50% or more in the aggregate is in principle owned by them, so in principle its assets are frozen and no funds or economic resources may be made available to it.`}</Text></SectionMessage>;
+    return <SectionMessage appearance="error" title="Blocked under the EU ownership rule"><Text>{`${listedPeople(a)}, confirmed on the EU consolidated list, ${one(a) ? 'holds' : 'hold a combined'} ${a.share}% of ${stop(cp.name)} Under the EU Best Practices, a company in which listed persons hold 50% or more in the aggregate is in principle owned by them, so its assets are frozen and no funds or economic resources may be made available to it.`}</Text></SectionMessage>;
   }
   if (a.reason === 'share-unknown') {
     return <SectionMessage appearance="error" title="Owner's share missing"><Text>{`${listedPeople(a)} is confirmed as a listed person, and the share is not given. Approval stays blocked until the share is entered in Vendor details.`}</Text></SectionMessage>;
