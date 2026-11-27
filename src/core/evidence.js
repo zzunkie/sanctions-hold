@@ -32,7 +32,13 @@ export function listFacts(entry) {
   const dobs = [...r.matchAll(/(?:^|;)\s*(?:alt\.\s*)?DOB\b:?\s*([^;]+)/gi)].map((m) => fmtDob(m[1].trim()));
   const nats = [...new Set([...r.matchAll(/(?:^|;)\s*(?:alt\.\s*)?(?:nationality|citizen)\b:?\s*([^;]+)/gi)].map((m) => m[1].trim()))];
   const years = [...new Set(dobs.flatMap(yearsOfDob))];
-  return { born: dobs.length ? [...new Set(dobs)].join('; ') : null, years, nationality: nats.length ? nats.join('; ') : null };
+  // OFAC remarks also give "POB ...", "Passport V45786901 (Iran)" and "National ID No. ... (Iran)".
+  const pobs = [...r.matchAll(/(?:^|;)\s*(?:alt\.\s*)?POB\b:?\s*([^;]+)/gi)].map((m) => m[1].trim().replace(/\.$/, ''));
+  const docs = (word) => [...r.matchAll(new RegExp(`(?:^|;)\\s*(?:alt\\.\\s*)?${word}\\s+([A-Z0-9][A-Z0-9-]{3,})(\\s+\\([^)]+\\))?`, 'gi'))].map((m) => `${m[1]}${m[2] || ''}`);
+  return {
+    born: dobs.length ? [...new Set(dobs)].join('; ') : null, years, nationality: nats.length ? nats.join('; ') : null,
+    placeOfBirth: pobs.length ? [...new Set(pobs)].join('; ') : null, passports: docs('Passport(?: No\\.?)?'), nationalIds: docs('National ID No\\.?'),
+  };
 }
 
 // The year-of-birth rule: a person match is cleared when the owner's year of birth is more than

@@ -5,7 +5,7 @@ import { ensureSchema, q, iso, getSetting, setSetting, logEvent } from './backen
 import { listState } from './backend/lists.js';
 import {
   counts, listCounterparties, counterpartyView, reviewQueue, ruleCleared, reviewMatch, createCounterparty, updateCounterparty,
-  byIssue, importCsv, removeSample, auditCsv, decideCounterparty,
+  byIssue, importCsv, removeSample, auditCsv, auditRows, decideCounterparty,
 } from './backend/counterparties.js';
 import { setVendorField } from './backend/vendor-field.js';
 import { screenCounterparties, getPolicy } from './backend/screening.js';
@@ -165,6 +165,7 @@ define('setupJira', async (_, ctx) => {
 });
 define('setupStatus', async () => ({ setup: await setupStatus() }));
 define('auditCsv', async ({ days }) => ({ csv: await auditCsv({ days }) }));
+define('auditRows', async ({ days }) => ({ rows: await auditRows({ days }) }));
 
 // Issue panel
 async function issueFields(issueKey) {

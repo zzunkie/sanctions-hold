@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ForgeReconciler, {
   Box, Stack, Inline, Heading, Text, Button, Link, Spinner, SectionMessage, SectionMessageAction, EmptyState,
   Tabs, TabList, Tab, TabPanel, DynamicTable, Select, Textfield, Label, FilePicker, CodeBlock, Lozenge, Strong,
-  Modal, ModalTransition, ModalHeader, ModalTitle, ModalBody, ModalFooter, xcss,
+  Modal, ModalTransition, ModalHeader, ModalTitle, ModalBody, ModalFooter, User, xcss,
 } from '@forge/react';
 import {
   call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, placesOfHit, IssueLink, listName, fmtDate, fmtTime, score, fmtVersion, listDates, matchedText, STATUS, countryName,
@@ -131,7 +131,17 @@ const EVENT_TEXT = {
   list_updated: 'Sanctions lists loaded',
   rescreen_all: 'All vendors screened',
   screened_by_tool: 'Screened by an agent',
-  counterparty_added: 'Request opened by an agent',
+  counterparty_added: 'Vendor added',
+  counterparty_edited: 'Vendor details edited',
+  counterparties_imported: 'Vendors imported',
+  sample_loaded: 'Sample vendors loaded',
+  screened: 'Screened',
+  status_changed: 'Status changed',
+  vendor_proceeded: 'Reviewer chose to proceed',
+  vendor_blocked: 'Reviewer blocked the vendor',
+  payment_hold_opened: 'Payment hold opened',
+  payment_holds_changed: 'Payment hold project changed',
+  jira_setup: 'Jira project set up',
   review_note_added: 'Review notes added by an agent',
   reviewers_changed: 'Reviewer group changed',
 };
@@ -156,18 +166,53 @@ const eventLabel = (e) => {
 // The list of a match in the activity table, so two matches for the same person read apart.
 const LIST_SHORT = { SDN: 'OFAC SDN', CONS: 'OFAC Consolidated', UK: 'UK', EU: 'EU' };
 
-function eventDetail(e) {
+function eventDetail(e, { lists = true } = {}) {
   const d = e.detail || {};
   if (e.type === 'list_updated') return d.initial ? `first import, lists updated ${listDates(d)}: ${Number(d.entries).toLocaleString('en-US')} entries${d.heldBack ? ' (newest SDN designations held back)' : ''}` : `lists updated ${listDates(d)}: ${d.added} added, ${d.removed} removed, ${d.changed} changed`;
   if (e.type === 'rescreen_all') return `${d.counterparties} vendors, ${d.newMatches} new possible matches`;
   // The reason of a rescreen ends with the account that changed Settings; the audit record keeps it, the table does not show it.
   const why = e.type === 'match_found' || byRuleOff(e) ? '' : String(d.reason || '').replace(/ by [0-9a-f]+:[0-9a-f-]+$/i, '');
   if (e.type.startsWith('match_')) return `${d.matchedName}, ${LIST_SHORT[String(e.entry_id).split(':')[0]] || 'list'} (${d.matchedOn ? d.matchedOn : score(d.score)})${why ? `: ${why}` : ''}`;
-  if (e.type === 'approved') return `screening result: ${STATUS[d.status]?.label || d.status}; lists updated ${fmtVersion(d.listVersion)}`;
+  if (e.type === 'approved') return `screening result: ${STATUS[d.status]?.label || d.status}${lists ? `; lists updated ${fmtVersion(d.listVersion)}` : ''}`;
   if (e.type === 'screened_by_tool') return `${d.owners?.length ? `with ${d.owners.join(', ')}: ` : ''}${d.matches ? `${d.matches} ${d.matches === 1 ? 'match' : 'matches'}` : 'no match'}`;
-  if (e.type === 'counterparty_added') return (d.owners || []).join(', ');
+  if (e.type === 'counterparty_added' || e.type === 'counterparty_edited') return (d.owners || []).join(', ');
   if (e.type === 'approval_blocked') return `${STATUS[d.status]?.label || d.status}; ${d.matches} open ${d.matches === 1 ? 'match' : 'matches'}`;
+  if (e.type === 'status_changed') return `${STATUS[d.from]?.label || d.from || 'new'} to ${STATUS[d.to]?.label || d.to}`;
+  if (e.type === 'screened') return `${d.matches ? `${d.matches} ${d.matches === 1 ? 'match' : 'matches'}` : 'no match'}${why ? `; ${why}` : ''}`;
+  if (e.type === 'vendor_proceeded' || e.type === 'vendor_blocked') return why;
+  if (e.type === 'payment_hold_opened') return `${d.workItem} in ${d.project}`;
+  if (e.type === 'counterparties_imported' || e.type === 'sample_loaded') return `${d.count} vendors`;
+  if (e.type === 'jira_setup') return `project ${d.project}${d.paymentHolds ? `, payment holds in ${d.paymentHolds}` : ''}`;
+  if (e.type === 'payment_holds_changed') return d.project || 'none';
+  if (e.type === 'reviewers_changed') return d.group || 'anyone who can open the work item';
   return '';
+}
+
+// Who made each change in the audit record: a Jira user, or the app, Jira or a rule acting on its own.
+const ACTOR = { app: 'Sanctions Hold', jira: 'Jira', mcp: 'MCP client', 'rule:birth-year': 'Year-of-birth rule' };
+const actorCell = (a) => (!a ? 'Sanctions Hold' : ACTOR[a] || (/^([0-9a-f]{24}|\d+:[0-9a-f-]{36})$/i.test(a) ? <User accountId={a} /> : a));
+
+function AuditRecord({ stamp }) {
+  const { data, loading } = useLoad('auditRows', { days: 90 }, [stamp]);
+  if (loading || !data) return <Spinner label="Loading the audit record" />;
+  return (
+    <DynamicTable
+      head={{ cells: [{ key: 't', content: 'Time (UTC)', width: 13 }, { key: 'e', content: 'Event', width: 18 }, { key: 'v', content: 'Vendor', width: 18 }, { key: 'd', content: 'Detail', width: 25 }, { key: 'l', content: 'Lists used', width: 13 }, { key: 'b', content: 'By', width: 13 }] }}
+      rowsPerPage={10}
+      emptyView={<Text>Nothing in the last 90 days.</Text>}
+      rows={data.rows.map((e, i) => ({
+        key: `${e.at}-${i}`,
+        cells: [
+          { key: 't', content: fmtTime(e.at) },
+          { key: 'e', content: eventLabel(e) },
+          { key: 'v', content: e.issue_key ? <Inline space="space.050" shouldWrap><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || e.detail?.name || '') },
+          { key: 'd', content: eventDetail(e, { lists: false }) },
+          { key: 'l', content: fmtVersion(e.detail?.listVersion || e.detail?.version) },
+          { key: 'b', content: actorCell(e.actor) },
+        ],
+      }))}
+    />
+  );
 }
 
 function Overview({ data, reload, goReview }) {
@@ -659,7 +704,8 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Audit record</Heading>
-        <Text color="color.text.subtle">Each screening, decision and blocked approval is kept with the list version it used, one row per event in the CSV.</Text>
+        <Text color="color.text.subtle">Each screening, decision and blocked approval is kept with the lists it used and who made it. The table shows the last 90 days, newest first; the CSV has the same events with every field.</Text>
+        <AuditRecord stamp={stamp} />
         <Inline><Button isLoading={busy === 'audit'} onClick={async () => { setBusy('audit'); try { setAudit((await call('auditCsv', { days: 90 })).csv); } finally { setBusy(null); } }}>Build the CSV for the last 90 days</Button></Inline>
         {audit ? <CodeBlock language="text" shouldWrapLongLines text={audit} /> : null}
       </Stack>

@@ -297,6 +297,7 @@ export async function matchEvidence(payload, context) {
         : { company: cp.name, country: cp.country ? countryNameOf(cp.country) : null, address: cp.address || null, registrationNumber: cp.reg_no || null },
       listDetails: e ? {
         type: e.kind, programOrRegime: e.programs || null, countries: e.countries || null, born: facts.born, nationality: facts.nationality,
+        ...(owner ? { placeOfBirth: facts.placeOfBirth || 'not given', passports: facts.passports.length ? facts.passports : 'not given', nationalIds: facts.nationalIds.length ? facts.nationalIds : 'not given' } : {}),
         aliases: (e.aliases || []).map((a) => a.n).slice(0, 15), addresses: (e.addresses || []).map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 5),
         ...(reg?.ids.length ? { registrationNumbers: reg.ids.map((x) => `${x.label} ${x.value}${x.country ? ` (${x.country})` : ''}`) } : {}),
         remarks: clipText(e.remarks, 2500), stillListed: e.onList,
@@ -322,7 +323,8 @@ export async function matchEvidence(payload, context) {
 export async function addReviewNote(payload, context) {
   await ensureSchema();
   const key = text(payload?.workItem, 40).toUpperCase();
-  const notes = String(payload?.notes ?? '').replace(/\r/g, '').trim().slice(0, 4000);
+  // Agents sometimes wrap the notes in backticks; the comment shows plain text.
+  const notes = String(payload?.notes ?? '').replace(/\r/g, '').trim().replace(/^`+|`+$/g, '').trim().slice(0, 4000);
   if (!/^[A-Z][A-Z0-9_]+-\d+$/.test(key)) return { error: 'Give the vendor\'s work item key, such as VEND-12.' };
   if (!notes) return { error: 'Give the notes to post.' };
   const [cp] = await q('SELECT id, name FROM counterparty WHERE issue_key = ?', key);

@@ -264,4 +264,15 @@ export async function auditCsv({ days = 90 } = {}) {
   return [head.join(','), ...rows.map((r) => [iso(r.at), r.type, r.issue_key, r.counterparty, r.entry_id, version(r.detail), r.actor, r.detail].map(csvCell).join(','))].join('\n');
 }
 
+// The audit record for the Settings table: the same events as the CSV, newest first, with the vendor and whether a match is on a person.
+export async function auditRows({ days = 90 } = {}) {
+  const since = dt(Date.now() - Math.min(366, Math.max(1, Number(days) || 90)) * 864e5);
+  const rows = await q(`SELECT l.at, l.type, COALESCE(l.issue_key, c.issue_key) AS issue_key, l.entry_id, l.detail, l.actor, c.name,
+                          (h.queried_name IS NOT NULL AND h.queried_name <> c.name) AS person
+                        FROM event_log l LEFT JOIN counterparty c ON c.id = l.counterparty_id
+                          LEFT JOIN hit h ON h.counterparty_id = l.counterparty_id AND h.entry_id = l.entry_id
+                        WHERE l.at >= ? ORDER BY l.at DESC LIMIT 500`, since);
+  return rows.map((r) => ({ ...r, at: iso(r.at), detail: JSON.parse(r.detail || 'null') }));
+}
+
 export { marks };
