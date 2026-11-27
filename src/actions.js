@@ -270,6 +270,8 @@ async function fromWorkItem(issueKey) {
   }
 }
 
+const OFAC_LISTS = new Set(['SDN', 'CONS']);
+
 export async function matchEvidence(payload, context) {
   await ensureSchema();
   const key = text(payload?.counterparty, 200);
@@ -297,7 +299,8 @@ export async function matchEvidence(payload, context) {
         : { company: cp.name, country: cp.country ? countryNameOf(cp.country) : null, address: cp.address || null, registrationNumber: cp.reg_no || null },
       listDetails: e ? {
         type: e.kind, programOrRegime: e.programs || null, countries: e.countries || null, born: facts.born, nationality: facts.nationality,
-        ...(owner ? { placeOfBirth: facts.placeOfBirth || 'not given', passports: facts.passports.length ? facts.passports : 'not given', nationalIds: facts.nationalIds.length ? facts.nationalIds : 'not given' } : {}),
+        // OFAC remarks give a person's place of birth and documents; the UK and EU details loaded here do not.
+        ...(owner && OFAC_LISTS.has(e.list) ? { placeOfBirth: facts.placeOfBirth || 'not given', passports: facts.passports.length ? facts.passports : 'not given', nationalIds: facts.nationalIds.length ? facts.nationalIds : 'not given' } : {}),
         aliases: (e.aliases || []).map((a) => a.n).slice(0, 15), addresses: (e.addresses || []).map((a) => [a.a, a.c, a.k].filter(Boolean).join(', ')).filter(Boolean).slice(0, 5),
         ...(reg?.ids.length ? { registrationNumbers: reg.ids.map((x) => `${x.label} ${x.value}${x.country ? ` (${x.country})` : ''}`) } : {}),
         remarks: clipText(e.remarks, 2500), stillListed: e.onList,
