@@ -105,7 +105,7 @@ define('listUpdates', async () => {
   const changes = await q(`SELECT ch.version_id, ch.change_type, ch.entry_id, ch.name, ch.programs, e.countries, e.kind FROM list_change ch
                            LEFT JOIN list_entry e ON e.entry_id = ch.entry_id ORDER BY ch.at DESC LIMIT 300`);
   // Vendors already in Sanctions Hold when an update loaded, matched to an entry that update added or changed.
-  const matched = await q(`SELECT h.found_version, h.entry_id, h.matched_name, h.score, h.status, h.reviewed_by, c.id, c.name, c.issue_key, c.approved_at
+  const matched = await q(`SELECT h.found_version, h.entry_id, h.matched_name, h.score, h.matched_on, h.status, h.reviewed_by, c.id, c.name, c.issue_key, c.approved_at
                            FROM hit h JOIN counterparty c ON c.id = h.counterparty_id JOIN list_version v ON v.id = h.found_version
                            WHERE c.created_at <= v.fetched_at
                              AND EXISTS (SELECT 1 FROM list_change ch WHERE ch.version_id = h.found_version AND ch.entry_id = h.entry_id)

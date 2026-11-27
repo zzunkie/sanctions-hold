@@ -8,6 +8,9 @@ import {
   call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, placesOfHit, IssueLink, listName, fmtDate, fmtTime, score, fmtVersion, listDates, matchedText, STATUS, countryName,
 } from './common.jsx';
 
+// A match found by registration number has no name score; the Score column says how it was found.
+const scoreCell = (n, matchedOn) => (matchedOn ? 'Registration number' : score(n));
+
 const pad = xcss({ paddingTop: 'space.200' });
 const narrow = xcss({ width: '320px' });
 
@@ -254,7 +257,7 @@ function Overview({ data, reload, goReview }) {
                 { key: 'w', content: <IssueLink k={h.counterparty.issueKey} /> },
                 { key: 'a', content: fmtDate(h.counterparty.approvedAt) },
                 { key: 'm', content: `${matchedText(h)}; ${h.entry?.programs || listName(h.entry?.list)}` },
-                { key: 's', content: score(h.score) },
+                { key: 's', content: scoreCell(h.score, h.matchedOn) },
                 { key: 'f', content: fmtDate(h.foundAt) },
               ],
             }))}
@@ -320,7 +323,7 @@ function ReviewQueue({ onChange, stamp }) {
     <Stack space="space.200">
       {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
-        head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'q', content: 'Found by' }, { key: 'm', content: 'List entry' }, { key: 'c', content: 'Vendor and list entry' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }, { key: 'x', content: '' }] }}
+        head={{ cells: [{ key: 'v', content: 'Vendor', width: 19 }, { key: 'q', content: 'Found by', width: 10 }, { key: 'm', content: 'List entry', width: 24 }, { key: 'c', content: 'Vendor and list entry', width: 25 }, { key: 's', content: 'Score', width: 8 }, { key: 'f', content: 'Found', width: 8 }, { key: 'x', content: '', width: 6 }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
           key: `${h.counterpartyId}-${h.entryId}`,
           cells: [
@@ -329,7 +332,7 @@ function ReviewQueue({ onChange, stamp }) {
             { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
-            { key: 's', content: score(h.score) },
+            { key: 's', content: scoreCell(h.score, h.matchedOn) },
             { key: 'f', content: fmtDate(h.foundAt) },
             { key: 'x', content: <Button onClick={() => setOpen(h)}>Review</Button> },
           ],
@@ -531,7 +534,7 @@ function ListUpdates({ stamp }) {
               head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'w', content: 'Work item' }, { key: 'a', content: 'Approved' }, { key: 'm', content: 'List entry' }, { key: 's', content: 'Score' }, { key: 'h', content: 'Review' }] }}
               rows={matched.map((m) => ({ key: `${m.id}-${m.entry_id}`, cells: [
                 { key: 'v', content: m.name }, { key: 'w', content: <IssueLink k={m.issue_key} /> }, { key: 'a', content: fmtDate(m.approved_at) },
-                { key: 'm', content: m.matched_name }, { key: 's', content: score(m.score) }, { key: 'h', content: <HitLozenge status={m.status} reviewedBy={m.reviewed_by} /> },
+                { key: 'm', content: m.matched_name }, { key: 's', content: scoreCell(m.score, m.matched_on) }, { key: 'h', content: <HitLozenge status={m.status} reviewedBy={m.reviewed_by} /> },
               ] }))}
             />
           ) : <Text>No vendor matches the changed entries.</Text>}
