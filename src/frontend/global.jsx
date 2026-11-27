@@ -271,7 +271,7 @@ function Overview({ data, reload, goReview }) {
             cells: [
               { key: 't', content: fmtTime(e.at) },
               { key: 'e', content: eventLabel(e) },
-              { key: 'v', content: e.issue_key ? <Inline space="space.050"><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || e.detail?.name || '') },
+              { key: 'v', content: e.issue_key ? <Inline space="space.050" shouldWrap><Text>{e.name || ''}</Text><IssueLink k={e.issue_key} /></Inline> : (e.name || e.detail?.name || '') },
               { key: 'd', content: eventDetail(e) },
             ],
           }))}
