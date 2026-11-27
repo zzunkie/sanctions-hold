@@ -11,7 +11,7 @@ import { CP_PROPERTY } from './backend/setup.js';
 import { ownerList, ownerStrings } from './core/owners.js';
 import { COUNTRIES, countryNameOf } from './core/countries.js';
 import { compact } from './core/match.js';
-import { compareOwner, listFacts, clearedByBirthYear, compareRegistration, countrySpellings } from './core/evidence.js';
+import { compareOwner, listFacts, clearedByBirthYear, birthYearClears, compareRegistration, countrySpellings } from './core/evidence.js';
 
 const LIST_NAMES = { SDN: 'OFAC SDN List', CONS: 'OFAC Consolidated Sanctions List', UK: 'UK Sanctions List', EU: 'EU Consolidated Financial Sanctions List' };
 // The EU reference number ("EU.12764.77") that the panel and the Commission's file show for an EU entry.
@@ -271,6 +271,11 @@ async function fromWorkItem(issueKey) {
 }
 
 const OFAC_LISTS = new Set(['SDN', 'CONS']);
+// What the year-of-birth rule makes of the owner's year against the entry's years: lists give some people
+// several or approximate years, so a year within one year of the entry's leaves the match open.
+const birthYearsApart = (owner, facts) => (owner?.born && facts.years?.length
+  ? { yearOfBirthRule: birthYearClears(owner.born, facts.years) ? 'rules the entry out (more than one year apart)' : 'does not rule the entry out (within one year)' }
+  : {});
 
 export async function matchEvidence(payload, context) {
   await ensureSchema();
@@ -306,7 +311,7 @@ export async function matchEvidence(payload, context) {
         remarks: clipText(e.remarks, 2500), stillListed: e.onList,
       } : null,
       compared: owner
-        ? { yearOfBirth: facts.bornCompared || 'not compared', nationality: facts.nationalityCompared || 'not compared' }
+        ? { yearOfBirth: facts.bornCompared || 'not compared', ...birthYearsApart(owner, facts), nationality: facts.nationalityCompared || 'not compared' }
         : { country: sameCountry || 'not compared', registrationNumber: reg?.registrationCompared || 'not compared' },
     };
   });
