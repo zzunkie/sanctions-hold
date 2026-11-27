@@ -58,7 +58,7 @@ Recall by kind at 0.92: listed name, alias, word order, legal suffix and one giv
 
 Registration numbers: all 14,034 numbers of six characters or more on company and organisation entries find their entry when searched with the country given for each. Searched by the registration number in their GLEIF LEI record, none of 10,809 companies (1,846 in Russia and 8,963 in 16 other countries and territories) matched another company's entry. Of the 1,846 Russian companies with an LEI and a number, 217 are on a list by their OGRN; for 40 of them neither the legal name nor any other name in the GLEIF record reaches 0.92, among them Drive Click Bank (listed by OFAC as Setelem Bank) and Bank PSB (listed as Promsvyazbank).
 
-Year of birth across lists: the lists sometimes disagree on a person's year of birth. For names listed by two of the three sources under the same primary name, with one year of birth on the first list, the second list's entry gives years more than a year apart in 97 of 6,925 checks (some of these pairs are different people with the same name), so the year-of-birth rule is off by default.
+Year-of-birth rule across lists (OFAC lists of 2026-11-23, UK and EU lists of 2026-11-26): for people listed under the same primary name by two of the three sources, `scripts/yob-cross.mjs` takes the single year of birth on the first entry as an owner's and screens that owner against all three lists with the rule on, as the app does, and all 6,969 checks go to review. In 97 checks every year of birth on the second entry is more than a year from the first entry's (28 with the same day and month of birth), so the rule clears the second entry while the first keeps the owner in review.
 
 ```sh
 scripts/fetch-ofac.sh /tmp/ofac

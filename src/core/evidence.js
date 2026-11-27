@@ -26,8 +26,10 @@ function yearsOfDob(d) {
 
 export function listFacts(entry) {
   const r = entry?.remarks || '';
-  const dobs = [...r.matchAll(/\bDOB:?\s*([^;]+)/gi)].map((m) => fmtDob(m[1].trim()));
-  const nats = [...new Set([...r.matchAll(/\b(?:nationality|citizen):?\s*([^;]+)/gi)].map((m) => m[1].trim()))];
+  // Only at the start of a "; "-separated part, so that a name such as "DOBROV" or a sentence about
+  // "citizens" in the statement of reasons is not read as a date of birth or a nationality.
+  const dobs = [...r.matchAll(/(?:^|;)\s*(?:alt\.\s*)?DOB\b:?\s*([^;]+)/gi)].map((m) => fmtDob(m[1].trim()));
+  const nats = [...new Set([...r.matchAll(/(?:^|;)\s*(?:alt\.\s*)?(?:nationality|citizen)\b:?\s*([^;]+)/gi)].map((m) => m[1].trim()))];
   const years = [...new Set(dobs.flatMap(yearsOfDob))];
   return { born: dobs.length ? [...new Set(dobs)].join('; ') : null, years, nationality: nats.length ? nats.join('; ') : null };
 }
