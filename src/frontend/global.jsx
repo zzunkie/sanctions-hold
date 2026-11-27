@@ -716,7 +716,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Year of birth</Heading>
-        <Text color="color.text.subtle">With the rule on, a match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry, unless another matched entry with the same primary name gives none or a year within one year. The work item and the audit record note each match it clears.</Text>
+        <Text color="color.text.subtle">With the rule on, a match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. The match stays open when another list names the same person with no date of birth or a year within one year. The work item and the audit record note each match it clears.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" isDisabled={off} value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
       </Stack>
       <Stack space="space.100">
