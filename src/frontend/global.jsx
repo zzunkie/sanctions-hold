@@ -2,14 +2,17 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ForgeReconciler, {
   Box, Stack, Inline, Heading, Text, Button, Link, Spinner, SectionMessage, SectionMessageAction, EmptyState,
   Tabs, TabList, Tab, TabPanel, DynamicTable, Select, Textfield, Label, FilePicker, CodeBlock, Lozenge, Strong,
-  Modal, ModalTransition, ModalHeader, ModalTitle, ModalBody, ModalFooter, User, xcss,
+  Modal, ModalTransition, ModalHeader, ModalTitle, ModalBody, ModalFooter, User, LinkButton, xcss,
 } from '@forge/react';
 import {
   call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, placesOfHit, IssueLink, listName, fmtDate, fmtTime, score, fmtVersion, listDates, matchedText, STATUS, countryName,
 } from './common.jsx';
 
-// A match found by registration number has no name score; the Score column says how it was found.
-const scoreCell = (n, matchedOn) => (matchedOn ? 'Registration number' : score(n));
+// How a match was found: by the company name, an owner's or director's name, or the registration number.
+const foundBy = (h, cp) => (h.matchedOn ? 'Registration number' : h.queriedName === cp.name ? 'Company name'
+  : `${ownerOfHit(h, cp)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}`);
+// A match found by registration number has no name score.
+const nameScore = (h) => (h.matchedOn ? '' : score(h.score));
 
 const pad = xcss({ paddingTop: 'space.200' });
 const narrow = xcss({ width: '320px' });
@@ -249,15 +252,16 @@ function Overview({ data, reload, goReview }) {
         <Stack space="space.100">
           <Heading size="small">Approved vendors with a new possible match</Heading>
           <DynamicTable
-            head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'w', content: 'Work item' }, { key: 'a', content: 'Approved' }, { key: 'm', content: 'Possible match' }, { key: 's', content: 'Score' }, { key: 'f', content: 'Found' }] }}
+            head={{ cells: [{ key: 'v', content: 'Vendor', width: 18 }, { key: 'w', content: 'Work item', width: 8 }, { key: 'a', content: 'Approved', width: 9 }, { key: 'q', content: 'Found by', width: 13 }, { key: 'm', content: 'Possible match', width: 36 }, { key: 's', content: 'Name score', width: 7 }, { key: 'f', content: 'Found', width: 9 }] }}
             rows={data.approvedMatched.map((h) => ({
               key: `${h.counterpartyId}-${h.entryId}`,
               cells: [
                 { key: 'v', content: h.counterparty.name },
                 { key: 'w', content: <IssueLink k={h.counterparty.issueKey} /> },
                 { key: 'a', content: fmtDate(h.counterparty.approvedAt) },
+                { key: 'q', content: foundBy(h, h.counterparty) },
                 { key: 'm', content: `${matchedText(h)}; ${h.entry?.programs || listName(h.entry?.list)}` },
-                { key: 's', content: scoreCell(h.score, h.matchedOn) },
+                { key: 's', content: nameScore(h) },
                 { key: 'f', content: fmtDate(h.foundAt) },
               ],
             }))}
@@ -318,11 +322,37 @@ function ReviewQueue({ onChange, stamp }) {
   if (loading && !data) return <Spinner label="Loading the review queue" />;
   if (error) return <SectionMessage appearance="error"><Text>{error}</Text></SectionMessage>;
   const cleared = data.ruleCleared || [];
-  const ownership = data.ownership || [];
-  if (!data.rows.length && !cleared.length && !ownership.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
+  // One row per vendor waiting for an ownership decision, with each confirmed list entry.
+  const waiting = [];
+  for (const h of data.ownership || []) {
+    let g = waiting.find((x) => x.cp.id === h.counterpartyId);
+    if (!g) waiting.push(g = { cp: h.counterparty, hits: [] });
+    g.hits.push(h);
+  }
+  if (!data.rows.length && !cleared.length && !waiting.length) return <EmptyState header="No possible matches waiting for review" description="Possible matches appear here when a vendor is added or edited, and when a list update matches a vendor you already have." />;
+  const vendors = new Set(data.rows.map((h) => h.counterpartyId)).size;
   return (
     <Stack space="space.200">
-      {data.rows.length ? <><Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${new Set(data.rows.map((h) => h.counterpartyId)).size} ${new Set(data.rows.map((h) => h.counterpartyId)).size === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
+      {waiting.length ? (
+        <Stack space="space.100">
+          <Heading size="small">{`Waiting for an ownership decision (${waiting.length})`}</Heading>
+          <Text color="color.text.subtle">A listed minority owner or director is confirmed and no ownership rule blocks the vendor. A reviewer decides in the Sanctions Hold panel whether to proceed or block.</Text>
+          <DynamicTable
+            head={{ cells: [{ key: 'v', content: 'Vendor', width: 22 }, { key: 'o', content: 'Confirmed owner or director', width: 22 }, { key: 'm', content: 'List entries', width: 36 }, { key: 'd', content: 'Confirmed', width: 10 }, { key: 'x', content: '', width: 10 }] }}
+            rows={waiting.map((g) => ({
+              key: g.cp.id,
+              cells: [
+                { key: 'v', content: <Stack space="space.050"><Text>{g.cp.name}</Text><IssueLink k={g.cp.issueKey} /></Stack> },
+                { key: 'o', content: <Stack space="space.050">{[...new Set(g.hits.map((h) => h.queriedName))].map((n) => { const o = ownerOfHit({ queriedName: n }, g.cp); return <Text key={n}>{`${n}, ${o?.role === 'director' ? 'director' : o?.share != null ? `owns ${o.share}%` : 'owner'}`}</Text>; })}</Stack> },
+                { key: 'm', content: <Stack space="space.200">{g.hits.map((h) => <Stack key={h.entryId} space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack>)}</Stack> },
+                { key: 'd', content: fmtDate(g.hits.map((h) => h.reviewedAt).sort().pop()) },
+                { key: 'x', content: g.cp.issueKey ? <LinkButton href={`/browse/${g.cp.issueKey}`}>Decide</LinkButton> : '' },
+              ],
+            }))}
+          />
+        </Stack>
+      ) : null}
+      {data.rows.length ? <Stack space="space.100">{waiting.length ? <Heading size="small">{`Possible matches (${vendors} ${vendors === 1 ? 'vendor' : 'vendors'})`}</Heading> : null}<Text color="color.text.subtle">{`${data.rows.length} possible ${data.rows.length === 1 ? 'match' : 'matches'} for ${vendors} ${vendors === 1 ? 'vendor' : 'vendors'} waiting for review. Approval stays blocked until a reviewer decides each one.`}</Text>
       <DynamicTable
         head={{ cells: [{ key: 'v', content: 'Vendor', width: 19 }, { key: 'q', content: 'Found by', width: 10 }, { key: 'm', content: 'List entry', width: 24 }, { key: 'c', content: 'Vendor and list entry', width: 25 }, { key: 's', content: 'Name score', width: 8 }, { key: 'f', content: 'Found', width: 8 }, { key: 'x', content: '', width: 6 }] }}
         rows={byVendor(data.rows).map((h, i, rows) => ({
@@ -330,22 +360,15 @@ function ReviewQueue({ onChange, stamp }) {
           cells: [
             // A vendor with several possible matches is named in full on its first row; the rows after it repeat the name in a lighter colour, with the work item.
             { key: 'v', content: i && rows[i - 1].counterpartyId === h.counterpartyId ? <Stack space="space.050"><Text color="color.text.subtle">{h.counterparty.name}</Text><IssueLink k={h.counterparty.issueKey} /></Stack> : <Stack space="space.050"><Text>{h.counterparty.name}</Text><Inline space="space.050">{h.counterparty.issueKey ? <IssueLink k={h.counterparty.issueKey} /> : null}{h.counterparty.approvedAt ? <Lozenge appearance="inprogress">{`Was approved ${fmtDate(h.counterparty.approvedAt)}`}</Lozenge> : null}</Inline></Stack> },
-            { key: 'q', content: h.matchedOn ? 'Registration number' : h.queriedName === h.counterparty.name ? 'Company name' : `${ownerOfHit(h, h.counterparty)?.role === 'director' ? 'Director' : 'Owner'}: ${h.queriedName}` },
+            { key: 'q', content: foundBy(h, h.counterparty) },
             { key: 'm', content: <Stack space="space.050"><Text>{matchedText(h)}</Text><Text color="color.text.subtle">{`${listName(h.entry?.list)} · ${h.entry?.programs || ''}`}</Text></Stack> },
             { key: 'c', content: placesOfHit(h, h.counterparty) },
-            { key: 's', content: h.matchedOn ? '' : score(h.score) },
+            { key: 's', content: nameScore(h) },
             { key: 'f', content: fmtDate(h.foundAt) },
             { key: 'x', content: <Button onClick={() => setOpen(h)}>Review</Button> },
           ],
         }))}
-      /></> : <Text>No possible matches waiting for review.</Text>}
-      {ownership.length ? (
-        <Stack space="space.100">
-          <Heading size="small">Waiting for an ownership decision</Heading>
-          <Text color="color.text.subtle">A listed minority owner or director is confirmed and no ownership rule blocks the vendor, so a reviewer decides in the Sanctions Hold panel whether to proceed or block.</Text>
-          <Inline space="space.200" shouldWrap>{ownership.map((c) => <Inline key={c.id} space="space.050"><Text>{c.name}</Text><IssueLink k={c.issue_key} /></Inline>)}</Inline>
-        </Stack>
-      ) : null}
+      /></Stack> : <Text>No possible matches waiting for review.</Text>}
       {cleared.length ? (
         <Stack space="space.100">
           <Heading size="small">Cleared by the year-of-birth rule</Heading>
@@ -539,10 +562,11 @@ function ListUpdates({ stamp }) {
           <Heading size="small">{`Vendors matched by the update loaded ${fmtTime(latest.fetched_at)} UTC`}</Heading>
           {matched.length ? (
             <DynamicTable
-              head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'w', content: 'Work item' }, { key: 'a', content: 'Approved' }, { key: 'm', content: 'List entry' }, { key: 's', content: 'Score' }, { key: 'h', content: 'Review' }] }}
+              head={{ cells: [{ key: 'v', content: 'Vendor' }, { key: 'w', content: 'Work item' }, { key: 'a', content: 'Approved' }, { key: 'q', content: 'Found by' }, { key: 'm', content: 'List entry' }, { key: 's', content: 'Name score' }, { key: 'h', content: 'Review' }] }}
               rows={matched.map((m) => ({ key: `${m.id}-${m.entry_id}`, cells: [
                 { key: 'v', content: m.name }, { key: 'w', content: <IssueLink k={m.issue_key} /> }, { key: 'a', content: fmtDate(m.approved_at) },
-                { key: 'm', content: m.matched_name }, { key: 's', content: scoreCell(m.score, m.matched_on) }, { key: 'h', content: <HitLozenge status={m.status} reviewedBy={m.reviewed_by} /> },
+                { key: 'q', content: foundBy({ matchedOn: m.matched_on, queriedName: m.queried_name }, { name: m.name, owners: m.owners }) },
+                { key: 'm', content: m.matched_name }, { key: 's', content: nameScore({ matchedOn: m.matched_on, score: m.score }) }, { key: 'h', content: <HitLozenge status={m.status} reviewedBy={m.reviewed_by} /> },
               ] }))}
             />
           ) : <Text>No vendor matches the changed entries.</Text>}

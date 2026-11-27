@@ -203,8 +203,8 @@ export const reviewQueue = () => queueRows("h.status = 'pending'", 'c.approved_a
 
 // Vendors in review with no possible match left open: a reviewer still has to proceed or block after a confirmed
 // match on a listed minority owner or director.
-export const ownershipWaiting = () => q(`SELECT c.id, c.name, c.issue_key FROM counterparty c WHERE c.status = 'review'
-  AND NOT EXISTS (SELECT 1 FROM hit h WHERE h.counterparty_id = c.id AND h.active = 1 AND h.status = 'pending') ORDER BY c.name LIMIT 50`);
+export const ownershipWaiting = () => queueRows(`h.status = 'confirmed' AND c.status = 'review'
+  AND NOT EXISTS (SELECT 1 FROM hit p WHERE p.counterparty_id = c.id AND p.active = 1 AND p.status = 'pending')`, 'c.name, h.reviewed_at');
 
 // Matches the year-of-birth rule cleared, for a reviewer to check, for example when a year of birth was typed wrong.
 export const ruleCleared = () => queueRows("h.status = 'dismissed' AND h.reviewed_by = 'rule:birth-year'", 'h.reviewed_at DESC');
