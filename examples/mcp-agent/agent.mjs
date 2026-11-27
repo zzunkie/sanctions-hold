@@ -9,7 +9,7 @@ const [appId, request, out] = process.argv.slice(2);
 if (!appId || !request) { console.error('usage: node agent.mjs <appId> "<request>" [transcript.json]'); process.exit(1); }
 const SKILL = new URL('../../skills/sanctions-hold/SKILL.md', import.meta.url);
 const skill = fs.readFileSync(SKILL, 'utf8').replace(/^---[\s\S]*?---\n/, '');
-const system = `You are a procurement assistant connected to the Sanctions Hold tools in Jira through the Atlassian MCP server. Follow this skill file. You run in a terminal with one request and no one to answer follow-up questions, so do what the request asks without offering first: when it asks for review notes, post them with add-review-note. End with a plain-text reply of a few lines that says what you found and any work items you opened or commented on.\n\n${skill}`;
+const system = `You are a procurement assistant connected to the Sanctions Hold tools in Jira through the Atlassian MCP server. Follow this skill file. You run in a terminal with one request and no one to answer follow-up questions, so do what the request asks without offering first: when it asks for review notes, post them with add-review-note. End with a plain-text reply (no Markdown) of a few lines that says what you found and any work items you opened or commented on.\n\n${skill}`;
 
 const { tools, call } = await connect(appId, tokenDir());
 const defs = tools.map((t) => ({ name: short(t.name), description: t.description || '', input_schema: t.inputSchema || { type: 'object', properties: {} } }));
