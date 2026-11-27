@@ -79,7 +79,7 @@ export function placesOfHit(hit, cp) {
   const line = (label, mine, listed, cmp) => (
     <Inline key={label} space="space.050" alignBlock="center" shouldWrap>
       <Text>{`${label} ${mine || 'not given'}, list ${listed || 'none'}`}</Text>
-      {cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'default'}>{cmp}</Lozenge> : null}
+      {cmp ? <Lozenge appearance={cmp === 'same' ? 'moved' : 'default'}>{cmp}</Lozenge> : null}
     </Inline>
   );
   if (!owner) {
@@ -115,8 +115,8 @@ export function MatchEvidence({ hit, cp, compact = false }) {
   const sameCountry = cp.country && listed ? countrySpellings(cp.country).some((x) => listed.includes(x)) : null;
   const facts = compareOwner(owner, e);
   const reg = owner ? { ids: [], registrationCompared: null } : compareRegistration(cp.registrationNumber, e);
-  // Red when the owner's detail agrees with the list entry, green when it differs.
-  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'removed' : 'default'}>{cmp}</Lozenge> : null);
+  // Yellow when the detail agrees with the list entry, grey when it differs.
+  const tag = (cmp) => (cmp ? <Lozenge appearance={cmp === 'same' ? 'moved' : 'default'}>{cmp}</Lozenge> : null);
   const withTag = (text, cmp) => (cmp ? <Inline space="space.050" alignBlock="center" shouldWrap><Text>{text}</Text>{tag(cmp)}</Inline> : text);
   if (compact) {
     const cmp = owner
@@ -134,7 +134,7 @@ export function MatchEvidence({ hit, cp, compact = false }) {
     row('n', owner ? (owner.role === 'director' ? 'Director' : 'Owner') : 'Name', owner ? `${owner.name}${owner.role === 'director' ? ' (director)' : owner.share != null ? ` (${owner.share}%)` : ''}` : cp.name, matchedText(hit)),
     // For an owner or director the company's country says nothing about the person; nationality does.
     ...(owner ? [] : [row('c', 'Country', countryName(cp.country) || 'not given',
-      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'removed' : 'default'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
+      <Inline space="space.050" alignBlock="center" shouldWrap><Text>{e.countries || 'none given'}</Text>{sameCountry === null ? null : <Lozenge appearance={sameCountry ? 'moved' : 'default'}>{sameCountry ? 'same' : 'differs'}</Lozenge>}</Inline>)]),
     // The kind only says something when it does not fit: a person matched to a company entry, or the reverse.
     ...((owner ? e.kind !== 'individual' : e.kind === 'individual') ? [row('t', 'Type', owner ? 'person' : 'company', e.kind)] : []),
     ...(e.kind === 'individual' && (facts.born || owner?.born) ? [row('b', 'Born', owner?.born || 'not given', withTag(facts.born || 'none given', facts.bornCompared))] : []),

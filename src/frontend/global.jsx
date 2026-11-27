@@ -232,7 +232,7 @@ function Overview({ data, reload, goReview }) {
       </Inline>
       {held ? (
         <SectionMessage appearance="information" title="Sample: the newest designations are held back" actions={[<SectionMessageAction key="r" onClick={replay}>{busy ? 'Starting…' : 'Replay them as a list update'}</SectionMessageAction>]}>
-          <Text>{`The sample started from the list updated ${data.list.published} without its newest designations (SDN entries ${held} and later). Replaying them loads the full list as an update and screens every vendor again, including vendors approved before those designations.`}</Text>
+          <Text>{`The sample started from the list updated ${data.list.published} without its newest designations (SDN entries ${data.list.holdBackFrom} and later). Replaying them loads the full list as an update and screens every vendor again, including vendors approved before those designations.`}</Text>
         </SectionMessage>
       ) : null}
       {!data.onboarding ? <JiraSetup setup={data.setup} onDone={reload} /> : (
@@ -503,7 +503,7 @@ function Vendors({ onChange, stamp }) {
   );
 }
 
-const CHANGE = { added: { label: 'Added', appearance: 'removed' }, removed: { label: 'Removed', appearance: 'success' }, changed: { label: 'Changed', appearance: 'moved' } };
+const CHANGE = { added: { label: 'Added', appearance: 'new' }, removed: { label: 'Removed', appearance: 'success' }, changed: { label: 'Changed', appearance: 'moved' } };
 
 function ListUpdates({ stamp }) {
   const { data, loading, error } = useLoad('listUpdates', {}, [stamp]);
@@ -676,12 +676,12 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Listed owners and directors</Heading>
-        <Text color="color.text.subtle">With the ownership rules, confirmed owners block the vendor under the rule of the list that names them: OFAC-listed or EU-listed owners holding 50% or more together, or one UK-listed owner holding more than 50%. A confirmed owner without a share also blocks. Otherwise, and for directors, a reviewer decides whether to proceed or block.</Text>
+        <Text color="color.text.subtle">Confirmed owners block the vendor under the rule of the list that names them: 50% or more together on the OFAC or EU list, or one UK-listed owner above 50%. For smaller shares and for directors, a reviewer decides whether to proceed.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="owner-rule" isDisabled={off} value={OWNER_RULES.find((r) => r.value === (data.policy.ownerRule || 'fifty'))} options={OWNER_RULES} onChange={(o) => o && save({ threshold: data.policy.threshold, ownerRule: o.value })} /></Box>
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Year of birth</Heading>
-        <Text color="color.text.subtle">With the rule on, a possible match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry. Because the lists sometimes record different years of birth for the same person, a match stays open if another matched entry with the same primary name gives no date of birth or a year within one year of theirs. A range of years on the entry counts as every year in it, and a circa year as two years either side. The audit record and the work item note each match the rule cleared, and the match comes back for review if the year of birth or the list entry changes.</Text>
+        <Text color="color.text.subtle">With the rule on, a match for an owner or director is cleared when their year of birth is more than one year from every date of birth on the list entry, unless another matched entry with the same primary name gives none or a year within one year. The work item and the audit record note each match it clears.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="birth-year" isDisabled={off} value={BIRTH_YEAR.find((r) => r.value === (data.policy.birthYearRule ? 'on' : 'off'))} options={BIRTH_YEAR} onChange={(o) => o && save({ birthYearRule: o.value === 'on' })} /></Box>
       </Stack>
       <Stack space="space.100">
@@ -691,7 +691,7 @@ function Settings({ onChange, onRemoved, stamp }) {
       </Stack>
       <Stack space="space.100">
         <Heading size="small">Payment holds</Heading>
-        <Text color="color.text.subtle">With a project chosen, when a list update, an import or a change in these settings finds a possible match for an approved vendor, the app also opens a work item "Hold payments to …" in that project, linked to the vendor's work item, so the payments team can hold payments until the match is decided. When the reviewer clears the vendor, the app comments that payments can resume and moves the hold to Done; when the vendor is blocked, it comments that payments stay on hold and leaves the hold open. If a reviewer reopens a cleared vendor's review, the app moves the hold back to To Do and comments that payments should be held again.</Text>
+        <Text color="color.text.subtle">With a project chosen, an approved vendor that a list update, an import or a settings change matches gets a work item "Hold payments to …" there, linked to its review. The hold moves to Done when the vendor is cleared and stays open when it is blocked.</Text>
         <Box xcss={xcss({ width: '480px' })}><Select inputId="payment-holds" isDisabled={off} value={data.paymentHolds ? { label: `${data.paymentHolds.name} (${data.paymentHolds.key})`, value: data.paymentHolds.key } : noHolds} options={holdOptions} onChange={(o) => o && savePaymentHolds(o.value)} /></Box>
       </Stack>
       <Stack space="space.100">

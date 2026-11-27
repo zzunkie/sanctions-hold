@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ForgeReconciler, { Stack, Inline, Text, Button, Textfield, Label, Spinner, SectionMessage, Heading, useProductContext } from '@forge/react';
 import { events } from '@forge/bridge';
 import { call, StatusLozenge, HitLozenge, MatchEvidence, ReviewForm, ReviewedNote, OwnershipNote, ownerOfHit, fmtTime, fmtVersion, countryName, listDates, useReviewAccess } from './common.jsx';
@@ -10,6 +10,16 @@ const STATUS_NOTE = {
   pending: 'Approval is held until a reviewer decides each possible match below.',
   dismissed: 'Every possible match was reviewed and dismissed. The vendor can be approved.',
   none: 'No possible match on the OFAC, UK or EU sanctions lists. The vendor can be approved.',
+};
+// The sidebar gives one line on where the review stands; the panel in the main column has the evidence and the decisions.
+const SIDEBAR_NOTE = {
+  'fifty-percent': "Blocked under OFAC's 50 Percent Rule.",
+  'uk-majority': 'Blocked under the UK ownership test.',
+  'eu-ownership': 'Blocked under the EU ownership rule.',
+  'share-unknown': "A listed owner's share is missing. Approval is blocked until it is entered in Vendor details.",
+  minority: 'A listed minority owner or director needs a decision in the Sanctions Hold panel.',
+  'reviewer-proceeded': 'A reviewer let the vendor proceed. It can be approved.',
+  'reviewer-blocked': 'Blocked by a reviewer.',
 };
 
 function Panel() {
@@ -23,9 +33,12 @@ function Panel() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const access = useReviewAccess();
+  const retries = useRef(0);
   const load = () => call('issueView', { issueKey }).then((r) => {
     setData(r);
     const cp = r.view?.counterparty;
+    // A work item opened right after it was created can load before its screening finishes, so look again shortly.
+    if (cp?.status === 'unscreened' && retries.current < 8) { retries.current += 1; setTimeout(load, 2500); }
     setForm(cp ? { name: cp.name, country: cp.country || '', address: cp.address || '', registrationNumber: cp.registrationNumber || '', owners: cp.owners.join('; ') } : { name: r.suggestion?.name || '', country: r.suggestion?.country || '', address: '', registrationNumber: '', owners: (r.suggestion?.owners || []).join('; ') });
   }, (e) => setError(e.message));
   useEffect(() => { if (issueKey) load(); }, [issueKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -81,15 +94,13 @@ function Panel() {
           {compact
             ? <Stack space="space.050"><Inline><StatusLozenge status={cp.status} /></Inline><Text weight="medium">{cp.name}</Text></Stack>
             : <Inline space="space.100" alignBlock="center" shouldWrap><StatusLozenge status={cp.status} /><Text weight="medium">{cp.name}</Text></Inline>}
-          <Text color="color.text.subtle">{compact
-            ? [countryName(cp.country) || 'No country', cp.registrationNumber ? `registration ${cp.registrationNumber}` : null, cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'].filter(Boolean).join(' · ')
-            : `${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>
-          {/* The sidebar is a summary: the status, the vendor's details and one line on what is left to decide. The panel explains. */}
-          {compact ? (toDecide ? <Text>{toDecide}</Text> : null) : note ? <Text>{note}</Text> : null}
-          <OwnershipNote view={view} onDone={changed} compact={compact} />
+          {compact ? null : <Text color="color.text.subtle">{`${[countryName(cp.country) || 'No country', cp.address, cp.registrationNumber ? `registration ${cp.registrationNumber}` : null].filter(Boolean).join(', ')} · ${cp.ownerDetails.length ? cp.ownerDetails.map(formatOwner).join(', ') : 'no owners given'} · screened ${fmtTime(cp.screened_at)} UTC against the lists updated ${cp.screened_version ? fmtVersion(cp.screened_version, { held: false }) : listDates(data.list)}`}</Text>}
+          {/* The sidebar is a summary: the status and one line on where the review stands. The panel explains. */}
+          {compact ? <Text>{toDecide || SIDEBAR_NOTE[view?.assessment?.reason] || note}</Text> : note ? <Text>{note}</Text> : null}
+          {compact ? null : <OwnershipNote view={view} onDone={changed} compact={compact} />}
           {/* Keyed by the order and status of the matches, so a decision that reorders them draws the list afresh. */}
           <Stack key={open.map((h) => `${h.entryId}:${h.status}`).join('|')} space="space.150">
-          {open.map((h) => {
+          {(compact ? [] : open).map((h) => {
             const owner = ownerOfHit(h, cp);
             return (
               <Stack key={h.entryId} space="space.100">
@@ -102,7 +113,8 @@ function Panel() {
             );
           })}
           </Stack>
-          {editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
+          {/* With a match, the panel in the main column has the same button. */}
+          {compact && open.length ? null : editing ? fields : <Inline><Button appearance="subtle" onClick={() => setEditing(true)}>Edit vendor name and details</Button></Inline>}
         </Stack>
       ) : (
         <Stack space="space.100">
